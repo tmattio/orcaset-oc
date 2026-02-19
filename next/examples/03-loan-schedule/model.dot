@@ -1,0 +1,19 @@
+digraph {
+  rankdir=TB
+  node [fontname="Helvetica" fontsize=11]
+  edge [color="#666666"]
+  7 [label="scan" shape=box style="filled,dashed" fillcolor="#FFF3E0"]
+  6 [label="Principal" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  0 [label="const" shape=box style=filled fillcolor="#E8F4FD"]
+  5 [label="Interest" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  4 [label="map2" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  3 [label="Balance" shape=box style="filled,dashed" fillcolor="#FFF3E0"]
+  1 [label="Year Fracs" shape=box style=filled fillcolor="#E8F4FD"]
+  7 -> 6
+  6 -> 0
+  6 -> 5
+  5 -> 4
+  4 -> 3
+  3 -> 7
+  4 -> 1
+}

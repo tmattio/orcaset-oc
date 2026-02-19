@@ -1,0 +1,73 @@
+digraph {
+  rankdir=TB
+  node [fontname="Helvetica" fontsize=11]
+  edge [color="#666666"]
+  350363 [label="Base Rent" shape=box style=filled fillcolor="#E8F4FD"]
+  350364 [label="Parking" shape=box style=filled fillcolor="#E8F4FD"]
+  350375 [label="CAM Recoveries" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  350374 [label="prev" shape=box style="filled,dashed" fillcolor="#FFF3E0"]
+  350380 [label="Total OpEx" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  350366 [label="Property Taxes" shape=box style=filled fillcolor="#E8F4FD"]
+  350367 [label="Insurance" shape=box style=filled fillcolor="#E8F4FD"]
+  350368 [label="Utilities" shape=box style=filled fillcolor="#E8F4FD"]
+  350369 [label="Repairs" shape=box style=filled fillcolor="#E8F4FD"]
+  350379 [label="Management" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  350378 [label="EGI" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  350376 [label="GPR" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  350365 [label="Other Income" shape=box style=filled fillcolor="#E8F4FD"]
+  350377 [label="Vacancy Loss" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  350370 [label="Janitorial" shape=box style=filled fillcolor="#E8F4FD"]
+  350371 [label="Landscaping" shape=box style=filled fillcolor="#E8F4FD"]
+  350372 [label="Security" shape=box style=filled fillcolor="#E8F4FD"]
+  350381 [label="NOI" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  350382 [label="Capital Reserves" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  350383 [label="Tenant Improvements" shape=box style=filled fillcolor="#E8F4FD"]
+  350384 [label="Leasing Commissions" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  350385 [label="Total CapEx" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  350386 [label="CFBF" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  350391 [label="Interest" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  350390 [label="Loan Balance" shape=box style="filled,dashed" fillcolor="#FFF3E0"]
+  350393 [label="scan" shape=box style="filled,dashed" fillcolor="#FFF3E0"]
+  350392 [label="Principal" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  350388 [label="Debt Payment" shape=box style=filled fillcolor="#E8F4FD"]
+  350387 [label="Year Fracs" shape=box style=filled fillcolor="#E8F4FD"]
+  350394 [label="Debt Service" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  350395 [label="CFAF" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  350375 -> 350374
+  350374 -> 350380
+  350380 -> 350366
+  350380 -> 350367
+  350380 -> 350368
+  350380 -> 350369
+  350380 -> 350379
+  350379 -> 350378
+  350378 -> 350376
+  350376 -> 350363
+  350376 -> 350364
+  350376 -> 350375
+  350376 -> 350365
+  350378 -> 350377
+  350377 -> 350376
+  350380 -> 350370
+  350380 -> 350371
+  350380 -> 350372
+  350381 -> 350378
+  350381 -> 350380
+  350382 -> 350378
+  350384 -> 350378
+  350385 -> 350382
+  350385 -> 350383
+  350385 -> 350384
+  350386 -> 350381
+  350386 -> 350385
+  350391 -> 350390
+  350390 -> 350393
+  350393 -> 350392
+  350392 -> 350388
+  350392 -> 350391
+  350391 -> 350387
+  350394 -> 350391
+  350394 -> 350392
+  350395 -> 350386
+  350395 -> 350394
+}

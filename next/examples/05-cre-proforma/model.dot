@@ -1,0 +1,75 @@
+digraph {
+  rankdir=TB
+  node [fontname="Helvetica" fontsize=11]
+  edge [color="#666666"]
+  33 [label="CFAF" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  23 [label="CFBF" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  18 [label="NOI" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  15 [label="EGI" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  13 [label="GPR" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  0 [label="Base Rent" shape=box style=filled fillcolor="#E8F4FD"]
+  1 [label="Parking" shape=box style=filled fillcolor="#E8F4FD"]
+  12 [label="CAM Recoveries" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  11 [label="prev" shape=box style="filled,dashed" fillcolor="#FFF3E0"]
+  17 [label="Total OpEx" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  3 [label="Property Taxes" shape=box style=filled fillcolor="#E8F4FD"]
+  4 [label="Insurance" shape=box style=filled fillcolor="#E8F4FD"]
+  5 [label="Utilities" shape=box style=filled fillcolor="#E8F4FD"]
+  6 [label="Repairs" shape=box style=filled fillcolor="#E8F4FD"]
+  16 [label="Property Management" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  7 [label="Janitorial" shape=box style=filled fillcolor="#E8F4FD"]
+  8 [label="Landscaping" shape=box style=filled fillcolor="#E8F4FD"]
+  9 [label="Security" shape=box style=filled fillcolor="#E8F4FD"]
+  2 [label="Other Income" shape=box style=filled fillcolor="#E8F4FD"]
+  14 [label="Vacancy Loss" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  22 [label="Total CapEx" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  19 [label="Capital Reserves" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  20 [label="Tenant Improvements" shape=box style=filled fillcolor="#E8F4FD"]
+  21 [label="Leasing Commissions" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  32 [label="Total Debt Service" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  29 [label="Interest Expense" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  28 [label="map2" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  27 [label="Loan Balance" shape=box style="filled,dashed" fillcolor="#FFF3E0"]
+  31 [label="scan" shape=box style="filled,dashed" fillcolor="#FFF3E0"]
+  30 [label="Principal" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  24 [label="Debt Payment" shape=box style=filled fillcolor="#E8F4FD"]
+  25 [label="Year Fracs" shape=box style=filled fillcolor="#E8F4FD"]
+  33 -> 23
+  23 -> 18
+  18 -> 15
+  15 -> 13
+  13 -> 0
+  13 -> 1
+  13 -> 12
+  12 -> 11
+  11 -> 17
+  17 -> 3
+  17 -> 4
+  17 -> 5
+  17 -> 6
+  17 -> 16
+  16 -> 15
+  17 -> 7
+  17 -> 8
+  17 -> 9
+  13 -> 2
+  15 -> 14
+  14 -> 13
+  18 -> 17
+  23 -> 22
+  22 -> 19
+  19 -> 15
+  22 -> 20
+  22 -> 21
+  21 -> 15
+  33 -> 32
+  32 -> 29
+  29 -> 28
+  28 -> 27
+  27 -> 31
+  31 -> 30
+  30 -> 24
+  30 -> 29
+  28 -> 25
+  32 -> 30
+}

@@ -1,0 +1,58 @@
+digraph {
+  rankdir=TB
+  node [fontname="Helvetica" fontsize=11]
+  edge [color="#666666"]
+  23 [label="Balance Check" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  19 [label="Total Assets" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  18 [label="Cash" shape=box style="filled,dashed" fillcolor="#FFF3E0"]
+  17 [label="Net Cash Change" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  15 [label="CF Operations" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  13 [label="Net Income" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  11 [label="EBT" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  2 [label="Gross Profit" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  0 [label="Revenue" shape=box style=filled fillcolor="#E8F4FD"]
+  1 [label="COGS" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  3 [label="OpEx" shape=box style=filled fillcolor="#E8F4FD"]
+  7 [label="Depreciation" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  6 [label="prev" shape=box style="filled,dashed" fillcolor="#FFF3E0"]
+  10 [label="PPE Net" shape=box style="filled,dashed" fillcolor="#FFF3E0"]
+  9 [label="PPE Change" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  8 [label="map" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  4 [label="CapEx" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  12 [label="Tax" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  14 [label="Depreciation Add-back" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  16 [label="CF Financing" shape=box style=filled fillcolor="#E8F4FD"]
+  22 [label="Total L&E" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  20 [label="Common Stock" shape=box style=filled fillcolor="#E8F4FD"]
+  21 [label="Retained Earnings" shape=box style="filled,dashed" fillcolor="#FFF3E0"]
+  23 -> 19
+  19 -> 18
+  18 -> 17
+  17 -> 15
+  15 -> 13
+  13 -> 11
+  11 -> 2
+  2 -> 0
+  2 -> 1
+  1 -> 0
+  11 -> 3
+  11 -> 7
+  7 -> 6
+  6 -> 10
+  10 -> 9
+  9 -> 8
+  8 -> 4
+  4 -> 0
+  9 -> 7
+  13 -> 12
+  12 -> 11
+  15 -> 14
+  14 -> 7
+  17 -> 4
+  17 -> 16
+  19 -> 10
+  23 -> 22
+  22 -> 20
+  22 -> 21
+  21 -> 13
+}

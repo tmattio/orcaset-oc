@@ -1,0 +1,22 @@
+digraph {
+  rankdir=TB
+  node [fontname="Helvetica" fontsize=11]
+  edge [color="#666666"]
+  7 [label="Income" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  6 [label="Revenue Total" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  0 [label="Software" shape=box style=filled fillcolor="#E8F4FD"]
+  5 [label="Services" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  4 [label="prev" shape=box style="filled,dashed" fillcolor="#FFF3E0"]
+  3 [label="OpEx Total" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  1 [label="COGS" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  2 [label="Admin" shape=box style=filled fillcolor="#E8F4FD"]
+  7 -> 6
+  6 -> 0
+  6 -> 5
+  5 -> 4
+  4 -> 3
+  3 -> 1
+  1 -> 0
+  3 -> 2
+  7 -> 3
+}
