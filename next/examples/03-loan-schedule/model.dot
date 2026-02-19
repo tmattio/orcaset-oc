@@ -9,11 +9,11 @@ digraph {
   4 [label="map2" shape=ellipse style=filled fillcolor="#F5F5F5"]
   3 [label="Balance" shape=box style="filled,dashed" fillcolor="#FFF3E0"]
   1 [label="Year Fracs" shape=box style=filled fillcolor="#E8F4FD"]
-  7 -> 6
-  6 -> 0
-  6 -> 5
-  5 -> 4
-  4 -> 3
-  3 -> 7
-  4 -> 1
+  6 -> 7
+  0 -> 6
+  5 -> 6
+  4 -> 5
+  3 -> 4
+  7 -> 3
+  1 -> 4
 }

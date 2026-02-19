@@ -493,7 +493,7 @@ module Deps = struct
         let deps = children_of_node n in
         List.iter
           (fun (dep : inner) ->
-            edges := { src = s.id; dst = dep.id } :: !edges;
+            edges := { src = dep.id; dst = s.id } :: !edges;
             visit dep)
           deps
       end
@@ -531,7 +531,7 @@ module Deps = struct
               let edge_key = (src_node.id, s.id) in
               if not (Hashtbl.mem seen_edges edge_key) then begin
                 Hashtbl.replace seen_edges edge_key ();
-                edges := { src = src_node.id; dst = s.id } :: !edges
+                edges := { src = s.id; dst = src_node.id } :: !edges
               end
             end
             else
