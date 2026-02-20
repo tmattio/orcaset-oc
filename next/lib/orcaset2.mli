@@ -8,12 +8,12 @@
     Orcaset models financial projections as declarative computations over time. The pipeline is:
 
     + Define {!Date}s and {!Period}s to establish calendar boundaries.
-    + Build a {!Timeline} -- a finite sequence of periods shared by all computations.
+    + Build a {!Timeline} or {!Schedule} -- a finite sequence of periods shared by all computations.
     + Describe {!Series} -- lazy, composable recipes that produce one [float] per period.
     + Optionally, organize series into a hierarchical {!Statement} for structured output.
 
-    Use {!Daycount} conventions for year fraction calculations (interest accrual, growth rates,
-    etc.).
+    Use {!Daycount} conventions for year fraction calculations (interest accrual, growth rates) and
+    {!Calendar} conventions for business day adjustment.
 
     {1 Quick start}
 
@@ -34,7 +34,7 @@
 
     {1 Modules}
 
-    {!modules:Date Period Daycount Timeline Series Statement} *)
+    {!modules:Date Period Daycount Calendar Timeline Schedule Series Statement} *)
 
 module Date : module type of Date
 (** Gregorian calendar dates. *)
@@ -45,8 +45,14 @@ module Period : module type of Period
 module Daycount : module type of Daycount
 (** Day count conventions for year fraction calculations. *)
 
+module Calendar : module type of Calendar
+(** Business day calendars and adjustment conventions. *)
+
 module Timeline : module type of Timeline
 (** Finite ordered sequences of periods. *)
+
+module Schedule : module type of Schedule
+(** Financial schedule generation with roll, stub, and business day conventions. *)
 
 module Series : module type of Series
 (** Declarative computations over a timeline. *)

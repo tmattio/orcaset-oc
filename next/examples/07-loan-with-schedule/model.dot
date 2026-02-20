@@ -1,0 +1,20 @@
+digraph {
+  rankdir=TB
+  node [fontname="Helvetica" fontsize=11]
+  edge [color="#666666"]
+  15 [label="CFAF" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  14 [label="NOI" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  12 [label="Revenue" shape=box style=filled fillcolor="#E8F4FD"]
+  13 [label="Operating Expenses" shape=box style=filled fillcolor="#E8F4FD"]
+  11 [label="Debt Service" shape=ellipse style=filled fillcolor="#F5F5F5"]
+  9 [label="Loan Interest" shape=box style=filled fillcolor="#E8F4FD"]
+  10 [label="Loan Principal" shape=box style=filled fillcolor="#E8F4FD"]
+  16 [label="Cash Balance" shape=box style="filled,dashed" fillcolor="#FFF3E0"]
+  14 -> 15
+  12 -> 14
+  13 -> 14
+  11 -> 15
+  9 -> 11
+  10 -> 11
+  15 -> 16
+}

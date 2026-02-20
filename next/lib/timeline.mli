@@ -12,7 +12,8 @@
     {1:construction Construction}
 
     Use {!monthly}, {!quarterly}, or {!yearly} for common calendars. For custom offsets use {!make}.
-    For fully explicit control use {!of_periods}. *)
+    For fully explicit control use {!of_periods}. For financial schedules with roll, stub, and
+    business day conventions use {!Schedule.make} and convert via {!Schedule.to_timeline}. *)
 
 type t
 (** The type for timelines. *)

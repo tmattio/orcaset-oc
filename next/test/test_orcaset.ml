@@ -339,7 +339,9 @@ let test_series_fixpoint () =
 let test_series_growth () =
   let sd = date 2025 1 1 in
   (* zero rate: constant *)
-  ev "zero rate" tl3 (Series.growth_simple ~start_date:sd ~rate:0.0 1000.0) [| 1000.0; 1000.0; 1000.0 |];
+  ev "zero rate" tl3
+    (Series.growth_simple ~start_date:sd ~rate:0.0 1000.0)
+    [| 1000.0; 1000.0; 1000.0 |];
   (* simple growth: monotonically increasing *)
   let v = Series.eval tl3 (Series.growth_simple ~start_date:sd ~rate:1.0 1000.0) in
   fl "simple p0" 1000.0 v.(0);
@@ -479,6 +481,172 @@ let test_deps () =
   check int "named nodes" 3 (List.length nodes);
   check int "named edges" 3 (List.length edges)
 
+(* Date: weekday *)
+
+let test_weekday () =
+  (* 2025-01-06 is Monday *)
+  check int "mon" 1 (Date.weekday (date 2025 1 6));
+  check int "tue" 2 (Date.weekday (date 2025 1 7));
+  check int "wed" 3 (Date.weekday (date 2025 1 8));
+  check int "thu" 4 (Date.weekday (date 2025 1 9));
+  check int "fri" 5 (Date.weekday (date 2025 1 10));
+  check int "sat" 6 (Date.weekday (date 2025 1 11));
+  check int "sun" 7 (Date.weekday (date 2025 1 12))
+
+(* Calendar *)
+
+let test_calendar () =
+  (* weekdays *)
+  check bool "mon bday" true (Calendar.weekdays (date 2025 1 6));
+  check bool "fri bday" true (Calendar.weekdays (date 2025 1 10));
+  check bool "sat off" false (Calendar.weekdays (date 2025 1 11));
+  check bool "sun off" false (Calendar.weekdays (date 2025 1 12));
+  let adj = Calendar.adjust in
+  let cal = Calendar.weekdays in
+  (* Unadjusted: no change *)
+  ds "unadj" "2025-01-11" (adj Unadjusted cal (date 2025 1 11));
+  (* Following: next business day *)
+  ds "fol sat" "2025-01-13" (adj Following cal (date 2025 1 11));
+  ds "fol sun" "2025-01-13" (adj Following cal (date 2025 1 12));
+  ds "fol weekday" "2025-01-10" (adj Following cal (date 2025 1 10));
+  (* Preceding: previous business day *)
+  ds "prec sat" "2025-01-10" (adj Preceding cal (date 2025 1 11));
+  ds "prec sun" "2025-01-10" (adj Preceding cal (date 2025 1 12));
+  (* Modified_following: next bday, but fall back if crosses month *)
+  ds "mf normal" "2025-01-13" (adj Modified_following cal (date 2025 1 11));
+  (* March 29, 2025 is Saturday; next bday is March 31 (same month) *)
+  ds "mf eom ok" "2025-03-31" (adj Modified_following cal (date 2025 3 29));
+  (* May 31, 2025 is Saturday; next bday is June 2 (crosses month) → fall back to May 30 *)
+  ds "mf cross" "2025-05-30" (adj Modified_following cal (date 2025 5 31));
+  (* Modified_preceding: prev bday, but next if crosses month *)
+  ds "mp normal" "2025-01-10" (adj Modified_preceding cal (date 2025 1 11));
+  (* March 1, 2025 is Saturday; prev bday is Feb 28 (crosses month) → next bday is March 3 *)
+  ds "mp cross" "2025-03-03" (adj Modified_preceding cal (date 2025 3 1))
+
+(* Schedule *)
+
+let test_schedule () =
+  let qoffset = Period.make_offset ~quarters:1 () in
+  let moffset = Period.make_offset ~months:1 () in
+  (* Basic quarterly schedule: 2025-01-01 to 2026-01-01 = 4 periods *)
+  let s = Schedule.make ~start_date:(date 2025 1 1) ~end_date:(date 2026 1 1) ~offset:qoffset () in
+  check int "q len" 4 (Schedule.length s);
+  let d = Schedule.dates s in
+  check int "q dates" 5 (Array.length d);
+  ds "q d0" "2025-01-01" d.(0);
+  ds "q d1" "2025-04-01" d.(1);
+  ds "q d2" "2025-07-01" d.(2);
+  ds "q d3" "2025-10-01" d.(3);
+  ds "q d4" "2026-01-01" d.(4);
+  (* Drift avoidance: monthly from Jan 31, dates should not drift *)
+  let s =
+    Schedule.make ~start_date:(date 2025 1 31) ~end_date:(date 2025 7 31) ~offset:moffset
+      ~stub:Short_last ()
+  in
+  let d = Schedule.dates s in
+  ds "drift d0" "2025-01-31" d.(0);
+  ds "drift d1" "2025-02-28" d.(1);
+  ds "drift d2" "2025-03-31" d.(2);
+  ds "drift d3" "2025-04-30" d.(3);
+  ds "drift d4" "2025-05-31" d.(4);
+  ds "drift d5" "2025-06-30" d.(5);
+  ds "drift d6" "2025-07-31" d.(6);
+  (* Roll: End_of_month *)
+  let s =
+    Schedule.make ~start_date:(date 2025 1 15) ~end_date:(date 2025 4 15) ~offset:moffset
+      ~roll:End_of_month ~stub:Short_last ()
+  in
+  let d = Schedule.dates s in
+  ds "eom d1" "2025-02-28" d.(1);
+  ds "eom d2" "2025-03-31" d.(2);
+  (* Roll: Day_of_month *)
+  let s =
+    Schedule.make ~start_date:(date 2025 1 1) ~end_date:(date 2025 4 1) ~offset:moffset
+      ~roll:(Day_of_month 15) ~stub:Short_last ()
+  in
+  let d = Schedule.dates s in
+  ds "dom d1" "2025-02-15" d.(1);
+  ds "dom d2" "2025-03-15" d.(2);
+  (* Stub: Short_first (backward) — stub at start *)
+  let s =
+    Schedule.make ~start_date:(date 2025 1 15) ~end_date:(date 2025 7 1) ~offset:qoffset
+      ~stub:Short_first ()
+  in
+  let d = Schedule.dates s in
+  ds "sf d0" "2025-01-15" d.(0);
+  ds "sf d1" "2025-04-01" d.(1);
+  ds "sf d2" "2025-07-01" d.(2);
+  check int "sf len" 2 (Schedule.length s);
+  (* Stub: Short_last (forward) — stub at end *)
+  let s =
+    Schedule.make ~start_date:(date 2025 1 1) ~end_date:(date 2025 5 15) ~offset:qoffset
+      ~stub:Short_last ()
+  in
+  let d = Schedule.dates s in
+  ds "sl d0" "2025-01-01" d.(0);
+  ds "sl d1" "2025-04-01" d.(1);
+  ds "sl d2" "2025-05-15" d.(2);
+  check int "sl len" 2 (Schedule.length s);
+  (* Stub: Long_first — merge first two periods *)
+  let s =
+    Schedule.make ~start_date:(date 2025 1 15) ~end_date:(date 2025 7 1) ~offset:qoffset
+      ~stub:Long_first ()
+  in
+  check int "lf len" 1 (Schedule.length s);
+  let d = Schedule.dates s in
+  ds "lf d0" "2025-01-15" d.(0);
+  ds "lf d1" "2025-07-01" d.(1);
+  (* Stub: Long_last — merge last two periods *)
+  let s =
+    Schedule.make ~start_date:(date 2025 1 1) ~end_date:(date 2025 5 15) ~offset:qoffset
+      ~stub:Long_last ()
+  in
+  check int "ll len" 1 (Schedule.length s);
+  let d = Schedule.dates s in
+  ds "ll d0" "2025-01-01" d.(0);
+  ds "ll d1" "2025-05-15" d.(1);
+  (* Business day adjustment: interior dates adjusted, endpoints fixed *)
+  let s =
+    Schedule.make ~start_date:(date 2025 1 1) ~end_date:(date 2026 1 1) ~offset:qoffset
+      ~bdc:Following ~calendar:Calendar.weekdays ()
+  in
+  let unadj = Schedule.unadjusted_dates s and adj = Schedule.dates s in
+  ds "bdc unadj d0" "2025-01-01" unadj.(0);
+  ds "bdc adj d0" "2025-01-01" adj.(0);
+  ds "bdc unadj d4" "2026-01-01" unadj.(4);
+  ds "bdc adj d4" "2026-01-01" adj.(4);
+  (* 2025-07-01 is Tuesday — no adjustment needed *)
+  ds "bdc adj d2" "2025-07-01" adj.(2);
+  (* Periods *)
+  let ps = Schedule.periods s in
+  check int "periods len" 4 (Array.length ps);
+  ds "p0 start" "2025-01-01" (Period.start_date ps.(0));
+  check bool "p0 end" true (Date.equal adj.(1) (Period.end_date ps.(0)));
+  (* Unadjusted periods *)
+  let ups = Schedule.unadjusted_periods s in
+  ds "up0 end" "2025-04-01" (Period.end_date ups.(0));
+  (* to_timeline round-trip *)
+  let tl = Schedule.to_timeline s in
+  check int "tl len" 4 (Timeline.length tl);
+  check bool "tl start" true (Date.equal adj.(0) (Timeline.start_date tl));
+  check bool "tl end" true (Date.equal adj.(4) (Timeline.end_date tl));
+  (* to_events *)
+  let events = Schedule.to_events (fun i _p -> float_of_int (i + 1) *. 100.0) s in
+  check int "events len" 4 (List.length events);
+  let e0_date, e0_val = List.hd events in
+  check bool "event0 date" true (Date.equal adj.(0) e0_date);
+  fl "event0 val" 100.0 e0_val;
+  (* to_string / pp *)
+  let str = Schedule.to_string s in
+  check bool "str has periods" true (has "4 periods" str);
+  let ppstr = to_s (fun ppf -> Schedule.pp ppf s) in
+  check bool "pp matches" true (String.equal str ppstr);
+  (* Error: end <= start *)
+  invalid "Schedule.make: end_date must be after start_date" (fun () ->
+      Schedule.make ~start_date:(date 2025 6 1) ~end_date:(date 2025 1 1) ~offset:qoffset ());
+  invalid "Schedule.make: end_date must be after start_date" (fun () ->
+      Schedule.make ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 1) ~offset:qoffset ())
+
 (* Integration: coffee shop model *)
 
 let test_coffee_shop () =
@@ -508,10 +676,12 @@ let test_coffee_shop () =
 let () =
   run "orcaset2"
     [
-      ("Date", [ test_case "date" `Quick test_date ]);
+      ("Date", [ test_case "date" `Quick test_date; test_case "weekday" `Quick test_weekday ]);
       ("Period", [ test_case "period" `Quick test_period ]);
       ("Timeline", [ test_case "timeline" `Quick test_timeline ]);
       ("Daycount", [ test_case "daycount" `Quick test_daycount ]);
+      ("Calendar", [ test_case "calendar" `Quick test_calendar ]);
+      ("Schedule", [ test_case "schedule" `Quick test_schedule ]);
       ( "Series",
         [
           test_case "constructors" `Quick test_series_constructors;

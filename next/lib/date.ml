@@ -85,6 +85,12 @@ let add_months d n =
     let day = Int.min d.day max_day in
     { year; month; day; jdn = compute_jdn ~year ~month ~day }
 
+(* Weekday *)
+
+(* JDN epoch (0) is a Monday, so jdn mod 7 gives 0=Mon .. 6=Sun.
+   We add 1 to match ISO 8601: 1=Monday .. 7=Sunday. *)
+let weekday d = (d.jdn mod 7) + 1
+
 (* Properties *)
 
 let days_in_month d = days_in_month_raw ~year:d.year ~month:d.month

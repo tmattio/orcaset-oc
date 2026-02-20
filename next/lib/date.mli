@@ -78,6 +78,12 @@ val add_months : t -> int -> t
       (* 2025-02-28: clamped from 31 to 28 *)
     ]} *)
 
+(** {1:weekday Day of week} *)
+
+val weekday : t -> int
+(** [weekday d] is the ISO 8601 day of week for [d]: [1] = Monday, ..., [7] = Sunday. Used by
+    {!Calendar.weekdays} to identify business days. *)
+
 (** {1:props Properties} *)
 
 val is_leap_year : int -> bool
