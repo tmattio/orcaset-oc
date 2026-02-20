@@ -40,7 +40,7 @@ module Date : module type of Date
 (** Gregorian calendar dates. *)
 
 module Period : module type of Period
-(** Contiguous time intervals. *)
+(** Contiguous time intervals and calendar offsets. *)
 
 module Daycount : module type of Daycount
 (** Day count conventions for year fraction calculations. *)
@@ -58,4 +58,4 @@ module Series : module type of Series
 (** Declarative computations over a timeline. *)
 
 module Statement : module type of Statement
-(** Hierarchical statement structure. *)
+(** Hierarchical statement structure for financial reports. *)

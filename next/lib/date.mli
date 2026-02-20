@@ -73,6 +73,9 @@ val add_months : t -> int -> t
     days than {!day}[ d], the day is clamped to the last day of the target month. [n] may be
     negative.
 
+    {b Note.} Day clamping is lossy: [add_months (add_months (make 2025 1 31) 1) (-1)] yields
+    [2025-01-28], not the original [2025-01-31].
+
     {[
       Date.add_months (Date.make 2025 1 31) 1
       (* 2025-02-28: clamped from 31 to 28 *)
@@ -98,4 +101,4 @@ val to_string : t -> string
 (** [to_string d] is [d] formatted as ["YYYY-MM-DD"]. *)
 
 val pp : Format.formatter -> t -> unit
-(** [pp] formats dates with {!to_string}. *)
+(** [pp] formats a date with {!to_string}. *)
