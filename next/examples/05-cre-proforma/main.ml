@@ -7,7 +7,7 @@
     Key patterns demonstrated:
     - [Series.feedback] to break a circular dependency: CAM recoveries depend on prior-period OpEx,
       while OpEx includes management fees that depend on current-period EGI.
-    - [Series.growth] for calendar-aware annual growth.
+    - [Series.growth_simple] for calendar-aware annual growth.
     - [Series.year_frac] and [Series.mul] for interest calculations.
     - [Series.cumsum] for a running loan balance.
     - [Statement.group] with explicit [~total] to build a hierarchical pro forma report. *)
@@ -64,34 +64,34 @@ let tl = Timeline.monthly ~start_date ~n:n_periods
 
 let base_rent_monthly = building_sf *. base_rent_per_sf_year1 /. 12.0
 let parking_monthly = float_of_int parking_spaces *. parking_rate_monthly
-let base_rent = Series.growth ~name:"Base Rent" ~start_date ~rate:rent_growth base_rent_monthly
-let parking = Series.growth ~name:"Parking" ~start_date ~rate:rent_growth parking_monthly
+let base_rent = Series.growth_simple ~name:"Base Rent" ~start_date ~rate:rent_growth base_rent_monthly
+let parking = Series.growth_simple ~name:"Parking" ~start_date ~rate:rent_growth parking_monthly
 
 let other_income =
-  Series.growth ~name:"Other Income" ~start_date ~rate:rent_growth other_income_monthly
+  Series.growth_simple ~name:"Other Income" ~start_date ~rate:rent_growth other_income_monthly
 
 (* Operating Expenses (non-EGI-dependent) *)
 
 let property_taxes =
-  Series.growth ~name:"Property Taxes" ~start_date ~rate:expense_growth
+  Series.growth_simple ~name:"Property Taxes" ~start_date ~rate:expense_growth
     (-.property_taxes_annual /. 12.0)
 
 let insurance =
-  Series.growth ~name:"Insurance" ~start_date ~rate:expense_growth (-.insurance_annual /. 12.0)
+  Series.growth_simple ~name:"Insurance" ~start_date ~rate:expense_growth (-.insurance_annual /. 12.0)
 
 let utilities =
-  Series.growth ~name:"Utilities" ~start_date ~rate:expense_growth (-.utilities_monthly)
+  Series.growth_simple ~name:"Utilities" ~start_date ~rate:expense_growth (-.utilities_monthly)
 
 let repairs_maintenance =
-  Series.growth ~name:"Repairs" ~start_date ~rate:expense_growth (-.repairs_monthly)
+  Series.growth_simple ~name:"Repairs" ~start_date ~rate:expense_growth (-.repairs_monthly)
 
 let janitorial =
-  Series.growth ~name:"Janitorial" ~start_date ~rate:expense_growth (-.janitorial_monthly)
+  Series.growth_simple ~name:"Janitorial" ~start_date ~rate:expense_growth (-.janitorial_monthly)
 
 let landscaping =
-  Series.growth ~name:"Landscaping" ~start_date ~rate:expense_growth (-.landscaping_monthly)
+  Series.growth_simple ~name:"Landscaping" ~start_date ~rate:expense_growth (-.landscaping_monthly)
 
-let security = Series.growth ~name:"Security" ~start_date ~rate:expense_growth (-.security_monthly)
+let security = Series.growth_simple ~name:"Security" ~start_date ~rate:expense_growth (-.security_monthly)
 
 (* Revenue ↔ OpEx feedback loop *)
 

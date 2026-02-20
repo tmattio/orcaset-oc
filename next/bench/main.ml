@@ -141,7 +141,7 @@ let daycount_benchmarks =
 let growth_bench n () =
   let start = Date.make 2025 1 1 in
   let tl = Timeline.monthly ~start_date:start ~n in
-  ignore (Series.eval tl (Series.growth ~start_date:start ~rate:0.05 1000.0))
+  ignore (Series.eval tl (Series.growth_simple ~start_date:start ~rate:0.05 1000.0))
 
 let growth_benchmarks = sized [ 12; 120; 360 ] growth_bench
 
@@ -238,7 +238,7 @@ let proforma_bench =
   fun n () ->
     let start = Date.make 2023 1 1 in
     let tl = Timeline.monthly ~start_date:start ~n in
-    let growing ~rate initial = Series.growth ~start_date:start ~rate initial in
+    let growing ~rate initial = Series.growth_simple ~start_date:start ~rate initial in
     let base_rent_monthly = building_sf *. base_rent_per_sf_year1 /. 12.0 in
     let parking_monthly = float_of_int parking_spaces *. parking_rate_monthly in
     (* Revenue *)
@@ -305,7 +305,7 @@ let proforma_benchmarks = sized [ 12; 120; 360 ] proforma_bench
 let scale_bench n () =
   let start = Date.make 2025 1 1 in
   let tl = Timeline.monthly ~start_date:start ~n in
-  ignore (Series.eval tl (Series.growth ~start_date:start ~rate:0.05 1000.0))
+  ignore (Series.eval tl (Series.growth_simple ~start_date:start ~rate:0.05 1000.0))
 
 let scale_benchmarks = sized [ 12; 120; 360; 1200; 3600 ] scale_bench
 

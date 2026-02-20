@@ -31,12 +31,12 @@ let tl = Timeline.make ~start_date ~offset:(Period.make_offset ~quarters:1 ()) ~
 
 (* Revenue *)
 
-let software = Series.growth ~name:"Software" ~start_date ~rate:software_growth software_first
+let software = Series.growth_simple ~name:"Software" ~start_date ~rate:software_growth software_first
 
 (* Operating Expenses *)
 
 let cogs = Series.named "COGS" (Series.scale cogs_pct software)
-let admin = Series.growth ~name:"Admin" ~start_date ~rate:admin_rate admin_first
+let admin = Series.growth_simple ~name:"Admin" ~start_date ~rate:admin_rate admin_first
 let opex_total = Series.sum ~name:"OpEx Total" [ cogs; admin ]
 
 (* Revenue (Continued) *)

@@ -32,7 +32,7 @@
       type usd
       type eur
 
-      let eur_revenue : eur Series.t = Series.growth ~start_date ~rate:0.05 8000.0
+      let eur_revenue : eur Series.t = Series.growth_simple ~start_date ~rate:0.05 8000.0
       let usd_revenue : usd Series.t = Series.convert ~rate:1.08 eur_revenue
     ]}
 
@@ -66,14 +66,6 @@ val init_tl : ?name:string -> (Timeline.t -> int -> Period.t -> float) -> 'c t
     when the computation needs timeline-level information such as the total number of periods or
     precomputation across all periods. *)
 
-val growth :
-  ?name:string ->
-  ?daycount:(Date.t -> Date.t -> float) ->
-  start_date:Date.t ->
-  rate:float ->
-  float ->
-  'c t
-(** [growth] is an alias for {!growth_simple}. *)
 
 val growth_simple :
   ?name:string ->

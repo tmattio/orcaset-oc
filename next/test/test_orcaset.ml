@@ -339,21 +339,21 @@ let test_series_fixpoint () =
 let test_series_growth () =
   let sd = date 2025 1 1 in
   (* zero rate: constant *)
-  ev "zero rate" tl3 (Series.growth ~start_date:sd ~rate:0.0 1000.0) [| 1000.0; 1000.0; 1000.0 |];
+  ev "zero rate" tl3 (Series.growth_simple ~start_date:sd ~rate:0.0 1000.0) [| 1000.0; 1000.0; 1000.0 |];
   (* simple growth: monotonically increasing *)
-  let v = Series.eval tl3 (Series.growth ~start_date:sd ~rate:1.0 1000.0) in
+  let v = Series.eval tl3 (Series.growth_simple ~start_date:sd ~rate:1.0 1000.0) in
   fl "simple p0" 1000.0 v.(0);
   check bool "simple grows" true (v.(2) > v.(1));
   (* simple growth with calendar_monthly daycount *)
   let v =
     Series.eval tl3
-      (Series.growth ~start_date:sd ~rate:1.0 ~daycount:Daycount.calendar_monthly 1200.0)
+      (Series.growth_simple ~start_date:sd ~rate:1.0 ~daycount:Daycount.calendar_monthly 1200.0)
   in
   fl "cm p0" 1200.0 v.(0);
   let yf1 = Daycount.calendar_monthly sd (date 2025 2 1) in
   fl "cm p1" (1200.0 *. (1.0 +. yf1)) v.(1);
   (* compound growth *)
-  let v = Series.eval tl3 (Series.growth_compound ~start_date:sd ~rate:0.10 1000.0) in
+  let v = Series.eval tl3 (Series.growth_simple_compound ~start_date:sd ~rate:0.10 1000.0) in
   fl "compound p0" 1000.0 v.(0);
   let yf2 = Daycount.actual_360 sd (date 2025 3 1) in
   fl "compound p2" (1000.0 *. ((1.0 +. 0.10) ** yf2)) v.(2);

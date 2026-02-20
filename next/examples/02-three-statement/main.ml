@@ -26,7 +26,7 @@ let tl = Timeline.monthly ~start_date ~n:12
 
 (* Income Statement *)
 
-let revenue = Series.growth ~name:"Revenue" ~start_date ~rate:revenue_growth_rate initial_revenue
+let revenue = Series.growth_simple ~name:"Revenue" ~start_date ~rate:revenue_growth_rate initial_revenue
 let cogs = Series.named "COGS" (Series.scale (-.cogs_pct) revenue)
 let gross_profit = Series.named "Gross Profit" (Series.add revenue cogs)
 let opex = Series.const ~name:"OpEx" (-.opex_monthly)

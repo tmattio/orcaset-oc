@@ -42,7 +42,7 @@ let tl = Timeline.monthly ~start_date ~n:12
 (* Revenue *)
 
 let recurring_revenue =
-  Series.growth ~name:"Recurring Revenue" ~start_date ~rate:recurring_growth recurring_first
+  Series.growth_simple ~name:"Recurring Revenue" ~start_date ~rate:recurring_growth recurring_first
 
 (* Non-recurring revenue: random walk with drift and volatility.
    Series.scan accumulates over a shock series -- each period's value
@@ -73,7 +73,7 @@ let non_recurring_cost =
 
 (* Admin Expenses *)
 
-let admin = Series.growth ~name:"Admin" ~start_date ~rate:admin_rate admin_first
+let admin = Series.growth_simple ~name:"Admin" ~start_date ~rate:admin_rate admin_first
 
 (* Statement *)
 

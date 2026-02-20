@@ -23,7 +23,7 @@
       let () =
         let start = Date.make 2025 1 1 in
         let tl = Timeline.monthly ~start_date:start ~n:12 in
-        let revenue = Series.growth ~start_date:start ~rate:0.05 8000.0 in
+        let revenue = Series.growth_simple ~start_date:start ~rate:0.05 8000.0 in
         let expense = Series.const (-3000.0) in
         let income = Series.add revenue expense in
         let values = Series.eval tl income in
