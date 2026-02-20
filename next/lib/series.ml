@@ -9,11 +9,8 @@
    during evaluation. This avoids structural equality on the entire DAG and
    lets nodes that share subexpressions deduplicate work. *)
 let next_id =
-  let counter = ref 0 in
-  fun () ->
-    let id = !counter in
-    counter := id + 1;
-    id
+  let counter = Atomic.make 0 in
+  fun () -> Atomic.fetch_and_add counter 1
 
 type node =
   | Const of float
