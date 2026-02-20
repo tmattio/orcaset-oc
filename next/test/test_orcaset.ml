@@ -353,7 +353,7 @@ let test_series_growth () =
   let yf1 = Daycount.calendar_monthly sd (date 2025 2 1) in
   fl "cm p1" (1200.0 *. (1.0 +. yf1)) v.(1);
   (* compound growth *)
-  let v = Series.eval tl3 (Series.growth_simple_compound ~start_date:sd ~rate:0.10 1000.0) in
+  let v = Series.eval tl3 (Series.growth_compound ~start_date:sd ~rate:0.10 1000.0) in
   fl "compound p0" 1000.0 v.(0);
   let yf2 = Daycount.actual_360 sd (date 2025 3 1) in
   fl "compound p2" (1000.0 *. ((1.0 +. 0.10) ** yf2)) v.(2);
