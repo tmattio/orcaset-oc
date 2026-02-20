@@ -45,7 +45,6 @@ let delay ?name thunk = mk ?name (Delay { resolved = None; thunk })
 let growth_simple ?name ?(daycount = Daycount.actual_360) ~start_date ~rate initial =
   init ?name (fun _i p -> initial *. (1.0 +. (rate *. daycount start_date (Period.start_date p))))
 
-
 let growth_compound ?name ?(daycount = Daycount.actual_360) ~start_date ~rate initial =
   init ?name (fun _i p -> initial *. ((1.0 +. rate) ** daycount start_date (Period.start_date p)))
 

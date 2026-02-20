@@ -64,7 +64,10 @@ let tl = Timeline.monthly ~start_date ~n:n_periods
 
 let base_rent_monthly = building_sf *. base_rent_per_sf_year1 /. 12.0
 let parking_monthly = float_of_int parking_spaces *. parking_rate_monthly
-let base_rent = Series.growth_simple ~name:"Base Rent" ~start_date ~rate:rent_growth base_rent_monthly
+
+let base_rent =
+  Series.growth_simple ~name:"Base Rent" ~start_date ~rate:rent_growth base_rent_monthly
+
 let parking = Series.growth_simple ~name:"Parking" ~start_date ~rate:rent_growth parking_monthly
 
 let other_income =
@@ -77,7 +80,8 @@ let property_taxes =
     (-.property_taxes_annual /. 12.0)
 
 let insurance =
-  Series.growth_simple ~name:"Insurance" ~start_date ~rate:expense_growth (-.insurance_annual /. 12.0)
+  Series.growth_simple ~name:"Insurance" ~start_date ~rate:expense_growth
+    (-.insurance_annual /. 12.0)
 
 let utilities =
   Series.growth_simple ~name:"Utilities" ~start_date ~rate:expense_growth (-.utilities_monthly)
@@ -91,7 +95,8 @@ let janitorial =
 let landscaping =
   Series.growth_simple ~name:"Landscaping" ~start_date ~rate:expense_growth (-.landscaping_monthly)
 
-let security = Series.growth_simple ~name:"Security" ~start_date ~rate:expense_growth (-.security_monthly)
+let security =
+  Series.growth_simple ~name:"Security" ~start_date ~rate:expense_growth (-.security_monthly)
 
 (* Revenue ↔ OpEx feedback loop *)
 

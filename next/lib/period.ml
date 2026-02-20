@@ -16,6 +16,7 @@ type offset = {
 
 let make ~start_date ~end_date = { start_date; end_date }
 
+(* CR: consider renaming to offset. *)
 let make_offset ?(days = 0) ?(weeks = 0) ?(months = 0) ?(quarters = 0) ?(years = 0)
     ?(month_end = false) () =
   { days; weeks; months; quarters; years; month_end }

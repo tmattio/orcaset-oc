@@ -66,7 +66,6 @@ val init_tl : ?name:string -> (Timeline.t -> int -> Period.t -> float) -> 'c t
     when the computation needs timeline-level information such as the total number of periods or
     precomputation across all periods. *)
 
-
 val growth_simple :
   ?name:string ->
   ?daycount:(Date.t -> Date.t -> float) ->
