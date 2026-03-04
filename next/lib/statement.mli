@@ -102,7 +102,14 @@ val eval : Timeline.t -> 'c Series.t item -> float array item
     Applies {!auto_total} first, then evaluates all series in a single shared memoization context
     via {!Series.eval_many}. The result is a structurally identical tree with [float array] data.
 
-    @raise Series.Cycle_error if a same-period cycle is detected. *)
+    Raises [Series.Cycle_error] if a same-period cycle is detected. *)
+
+val eval_materialized : Timeline.t -> 'c Series.t item -> 'c Series.Materialized.t item
+(** [eval_materialized tl item] is like {!eval} but returns {!Series.Materialized.t} values that
+    keep period bindings attached to each result array. Applies {!auto_total} first and shares a
+    single memoization context.
+
+    Raises [Series.Cycle_error] if a same-period cycle is detected. *)
 
 (** {1:pp Pretty-printing} *)
 

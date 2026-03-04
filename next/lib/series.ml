@@ -349,6 +349,7 @@ let eval_many tl ss =
 module Materialized = struct
   type 'c t = { timeline : Timeline.t; values : float array }
 
+  let make timeline values = { timeline; values }
   let timeline m = m.timeline
   let values m = m.values
   let length m = Array.length m.values

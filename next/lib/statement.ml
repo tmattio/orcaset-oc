@@ -86,6 +86,16 @@ let eval tl item =
   let pairs = List.combine all_series results in
   map (fun s -> List.assq s pairs) item
 
+let eval_materialized tl item =
+  let item = auto_total item in
+  let all_series = collect_series item in
+  let results = Series.eval_many tl all_series in
+  let pairs = List.combine all_series results in
+  map (fun s ->
+    let vs = List.assq s pairs in
+    Series.Materialized.make tl vs
+  ) item
+
 (* Pretty-printing *)
 
 type layout = {

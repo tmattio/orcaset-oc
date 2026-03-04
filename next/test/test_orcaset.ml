@@ -495,7 +495,28 @@ let test_statement () =
         Statement.pp l ppf (Statement.eval tl2 (Statement.line "Test" (Series.const 42.0))))
   in
   check bool "custom P0" true (has "P0" out);
-  check bool "custom sep" true (has "=====" out)
+  check bool "custom sep" true (has "=====" out);
+  (* eval_materialized keeps period bindings *)
+  let mat_stmt =
+    Statement.eval_materialized tl3
+      (Statement.group "G"
+         [ Statement.line "A" (Series.const 7.0); Statement.line "B" (Series.const 3.0) ])
+  in
+  let mat_lines = Statement.lines mat_stmt in
+  List.iter
+    (fun (_, m) ->
+      check int "mat length" 3 (Series.Materialized.length m);
+      let p0 = Series.Materialized.period m 0 in
+      check bool "mat period" true (Date.equal (Period.start_date p0) (date 2025 1 1)))
+    mat_lines;
+  (* total is also materialized *)
+  (match
+     Statement.fold mat_stmt
+       ~line_fn:(fun _ _ -> None)
+       ~group_fn:(fun _ _ total -> total)
+   with
+  | Some m -> fla "mat total" [| 10.0; 10.0; 10.0 |] (Series.Materialized.values m)
+  | None -> fail "expected materialized total")
 
 (* Deps *)
 

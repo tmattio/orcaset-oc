@@ -298,6 +298,9 @@ module Materialized : sig
   type 'c t
   (** The type for materialized series results. Each value is bound to its period. *)
 
+  val make : Timeline.t -> float array -> 'c t
+  (** [make tl values] is a materialized result binding [values] to the periods of [tl]. *)
+
   val timeline : _ t -> Timeline.t
   (** [timeline m] is the timeline [m] was evaluated against. *)
 
