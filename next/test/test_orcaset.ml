@@ -422,6 +422,25 @@ let test_series_query () =
     (Invalid_argument "Series.Query.balance_at: date 2024-01-01 is outside the timeline") (fun () ->
       Series.Query.balance_at tl ~balance:bv ~flow:fv (date 2024 1 1))
 
+(* Materialized *)
+
+let test_materialized () =
+  let s = Series.of_array [| 10.0; 20.0; 30.0 |] in
+  let m = Series.eval_materialized tl3 s in
+  check int "length" 3 (Series.Materialized.length m);
+  fl "get 0" 10.0 (Series.Materialized.get m 0);
+  fl "get 2" 30.0 (Series.Materialized.get m 2);
+  ds "period 0 start" "2025-01-01" (Period.start_date (Series.Materialized.period m 0));
+  let pairs = Series.Materialized.to_list m in
+  check int "to_list len" 3 (List.length pairs);
+  let sum =
+    Series.Materialized.fold (fun acc _p v -> acc +. v) 0.0 m
+  in
+  fl "fold sum" 60.0 sum;
+  let count = ref 0 in
+  Series.Materialized.iter (fun _p _v -> incr count) m;
+  check int "iter count" 3 !count
+
 (* Statement *)
 
 let test_statement () =
@@ -789,6 +808,7 @@ let () =
           test_case "growth" `Quick test_series_growth;
           test_case "query" `Quick test_series_query;
         ] );
+      ("Materialized", [ test_case "materialized" `Quick test_materialized ]);
       ("Statement", [ test_case "statement" `Quick test_statement ]);
       ("Deps", [ test_case "deps" `Quick test_deps ]);
       ("Key", [ test_case "key" `Quick test_key ]);

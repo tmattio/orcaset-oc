@@ -289,6 +289,44 @@ val eval_many : Timeline.t -> 'c t list -> float array list
     @raise Cycle_error if a same-period cycle is detected.
     @raise Convergence_error if a {!fixpoint} does not converge. *)
 
+(** {2:materialized Materialized results}
+
+    Evaluation results that keep period bindings attached, preventing accidental misalignment
+    between values and their periods. *)
+
+module Materialized : sig
+  type 'c t
+  (** The type for materialized series results. Each value is bound to its period. *)
+
+  val timeline : _ t -> Timeline.t
+  (** [timeline m] is the timeline [m] was evaluated against. *)
+
+  val values : _ t -> float array
+  (** [values m] is the raw array of values. Prefer {!get} and {!period} for safe access. *)
+
+  val length : _ t -> int
+  (** [length m] is the number of values. *)
+
+  val get : _ t -> int -> float
+  (** [get m i] is the value at period [i]. *)
+
+  val period : _ t -> int -> Period.t
+  (** [period m i] is the period at index [i]. *)
+
+  val to_list : _ t -> (Period.t * float) list
+  (** [to_list m] is the list of [(period, value)] pairs. *)
+
+  val iter : (Period.t -> float -> unit) -> _ t -> unit
+  (** [iter f m] applies [f period value] to each element. *)
+
+  val fold : ('a -> Period.t -> float -> 'a) -> 'a -> _ t -> 'a
+  (** [fold f init m] folds [f] over each [(period, value)] pair. *)
+end
+
+val eval_materialized : Timeline.t -> 'c t -> 'c Materialized.t
+(** [eval_materialized tl s] is like {!eval} but returns a {!Materialized.t} that keeps the
+    timeline bound to the values. *)
+
 (** {1:syntax Infix syntax}
 
     Open this module to use arithmetic operators on series.

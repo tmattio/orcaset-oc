@@ -344,6 +344,37 @@ let eval_many tl ss =
   let ctx = make_ctx tl in
   List.map (fun s -> eval_with_ctx ctx s) ss
 
+(* Materialized results *)
+
+module Materialized = struct
+  type 'c t = { timeline : Timeline.t; values : float array }
+
+  let timeline m = m.timeline
+  let values m = m.values
+  let length m = Array.length m.values
+  let get m i = m.values.(i)
+  let period m i = Timeline.get m.timeline i
+
+  let to_list m =
+    List.init (Array.length m.values) (fun i -> (Timeline.get m.timeline i, m.values.(i)))
+
+  let fold f init m =
+    let acc = ref init in
+    for i = 0 to Array.length m.values - 1 do
+      acc := f !acc (Timeline.get m.timeline i) m.values.(i)
+    done;
+    !acc
+
+  let iter f m =
+    for i = 0 to Array.length m.values - 1 do
+      f (Timeline.get m.timeline i) m.values.(i)
+    done
+end
+
+let eval_materialized tl s =
+  let vs = eval tl s in
+  { Materialized.timeline = tl; values = vs }
+
 (* Infix Operators *)
 
 module Syntax = struct
