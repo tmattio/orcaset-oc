@@ -39,8 +39,8 @@ let of_periods periods =
   validate_periods periods;
   { periods = Array.copy periods }
 
-let of_periods_unsafe periods =
-  if Array.length periods = 0 then invalid_arg "Timeline.of_periods_unsafe: empty array";
+let unsafe_of_periods periods =
+  if Array.length periods = 0 then invalid_arg "Timeline.unsafe_of_periods: empty array";
   { periods = Array.copy periods }
 
 let length tl = Array.length tl.periods

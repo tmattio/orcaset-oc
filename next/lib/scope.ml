@@ -4,10 +4,9 @@
   ---------------------------------------------------------------------------*)
 
 type binding = Binding : 'a Key.t * 'a -> binding
-type t = { mutable entries : binding list; mutable sealed : bool; parent : t option }
+type t = { mutable entries : binding list; mutable sealed : bool; imports : t list }
 
-let create () = { entries = []; sealed = false; parent = None }
-let create_child parent = { entries = []; sealed = false; parent = Some parent }
+let create ?(imports = []) () = { entries = []; sealed = false; imports }
 
 let has_local_key (type a) scope (key : a Key.t) =
   List.exists (fun (Binding (k, _)) -> Key.equal k key) scope.entries
@@ -33,27 +32,36 @@ let find_in_entries : type a. binding list -> a Key.t -> a option =
   in
   loop entries
 
-let rec find : type a. t -> a Key.t -> a =
- fun scope key ->
-  match find_in_entries scope.entries key with
-  | Some v -> v
-  | None -> (
-      match scope.parent with
-      | Some p -> find p key
-      | None -> invalid_arg (Printf.sprintf "Scope.find: key %s not found" (Key.name key)))
-
 let rec find_opt : type a. t -> a Key.t -> a option =
  fun scope key ->
   match find_in_entries scope.entries key with
   | Some _ as r -> r
-  | None -> (
-      match scope.parent with
-      | Some p -> find_opt p key
-      | None -> None)
+  | None ->
+      let found =
+        List.filter_map (fun imp -> find_opt imp key) scope.imports
+      in
+      (match found with
+       | [ v ] -> Some v
+       | [] -> None
+       | _ ->
+           invalid_arg
+             (Printf.sprintf "Scope.find: key %s is ambiguous across imports"
+                (Key.name key)))
+
+let find : type a. t -> a Key.t -> a =
+ fun scope key ->
+  match find_opt scope key with
+  | Some v -> v
+  | None ->
+      invalid_arg (Printf.sprintf "Scope.find: key %s not found" (Key.name key))
 
 let mem scope key = Option.is_some (find_opt scope key)
 let mem_local scope key = has_local_key scope key
 
+let find_local : type a. t -> a Key.t -> a option =
+ fun scope key -> find_in_entries scope.entries key
+
+let imports scope = scope.imports
 let keys scope = List.rev_map (fun (Binding (k, _)) -> Key.pack k) scope.entries
 let size scope = List.length scope.entries
 let is_sealed scope = scope.sealed

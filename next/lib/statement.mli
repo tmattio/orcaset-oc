@@ -5,32 +5,33 @@
 
 (** Hierarchical statement structure.
 
-    A statement is a tree of labeled data, typically {!Formula.t} values, organized into the sections
+    A statement is a tree of labeled data, typically {!series} values, organized into the sections
     and line items of a financial statement (income statements, balance sheets, cash flow
     statements, etc.).
 
     Leaf nodes ({!Line}) carry a label and a datum. Interior nodes ({!Group}) carry a label, a list
     of children, and an optional total. When the total is omitted, {!auto_total} (called implicitly
-    by {!eval}) synthesizes one by summing the direct children.
+    by {!eval}) synthesizes one by summing the direct children — but only when all children are the
+    same kind (all flows, all balances, or all formulas). Mixed groups skip auto-total.
 
     {1 Building}
 
-    Construct a statement with {!line} and {!group}:
+    Construct a statement with {!flow_line}, {!balance_line}, and {!group}:
 
     {[
       let stmt =
         let open Statement in
         group "Income Statement"
           [
-            line "Revenue" revenue;
-            group "Operating Expenses" [ line "COGS" cogs; line "Rent" rent ];
-            line "Net Income" net_income;
+            flow_line "Revenue" revenue;
+            group "Operating Expenses" [ flow_line "COGS" cogs; flow_line "Rent" rent ];
+            flow_line "Net Income" net_income;
           ]
     ]}
 
     {1 Evaluating}
 
-    Use {!eval} to materialize a [Formula.t item] into a [float array item] against a {!Timeline.t}.
+    Use {!eval} to materialize a [series item] into a [float array item] against a {!Timeline.t}.
     All formulas in the tree share a single memoization context via {!Formula.eval_many}.
 
     {1 Traversing}
@@ -45,6 +46,26 @@ type 'a item =
   | Group of { label : string; items : 'a item list; total : 'a option }
       (** An interior node with a label, children, and an optional aggregate. *)
 
+(** {1:series Series} *)
+
+(** The type for statement series. Preserves the flow/balance distinction until evaluation. *)
+type 'c series =
+  | Flow : 'c Flow.t -> 'c series
+  | Balance : 'c Balance.t -> 'c series
+  | Formula : 'c Formula.t -> 'c series
+
+val flow : 'c Flow.t -> 'c series
+(** [flow f] is [Flow f]. *)
+
+val balance : 'c Balance.t -> 'c series
+(** [balance b] is [Balance b]. *)
+
+val formula : 'c Formula.t -> 'c series
+(** [formula f] is [Formula f]. *)
+
+val to_formula : 'c series -> 'c Formula.t
+(** [to_formula s] extracts the underlying {!Formula.t} from [s]. *)
+
 (** {1:constructors Constructors} *)
 
 val line : string -> 'a -> 'a item
@@ -54,36 +75,30 @@ val group : ?total:'a -> string -> 'a item list -> 'a item
 (** [group ?total label items] is [Group {label; items; total}].
 
     When [total] is omitted, {!eval} and {!auto_total} will synthesize one by summing the direct
-    children's data. Supply an explicit [total] to override this with a custom calculation. *)
+    children's data — but only when all children are the same kind. Mixed children (flows and
+    balances together) skip auto-total. Supply an explicit [total] to override this. *)
 
-val flow_line : string -> 'c Flow.t -> 'c Formula.t item
-(** [flow_line label f] is [line label (Flow.unsafe_to_formula f)]. Convenience for adding a flow
-    to a statement without manually extracting the formula.
+val flow_line : string -> 'c Flow.t -> 'c series item
+(** [flow_line label f] is [line label (Flow f)]. *)
 
-    {b Note.} The flow/balance distinction is erased: the statement tree holds {!Formula.t} values.
-    This means {!auto_total} sums all children uniformly. Mixing flows and balances in the same
-    group is permitted but the total loses semantic meaning. *)
+val balance_line : string -> 'c Balance.t -> 'c series item
+(** [balance_line label b] is [line label (Balance b)]. *)
 
-val balance_line : string -> 'c Balance.t -> 'c Formula.t item
-(** [balance_line label b] is [line label (Balance.unsafe_to_formula b)]. Convenience for adding a
-    balance to a statement without manually extracting the formula.
+val formula_line : string -> 'c Formula.t -> 'c series item
+(** [formula_line label f] is [line label (Formula f)]. *)
 
-    See the note on {!flow_line} about flow/balance erasure. *)
-
-val flow_group : ?total:'c Flow.t -> string -> 'c Formula.t item list -> 'c Formula.t item
-(** [flow_group ?total label items] is
-    [group ?total:(Option.map Flow.unsafe_to_formula total) label items]. Convenience for adding a
-    group with a flow total without manually extracting the formula.
-
-    See the note on {!flow_line} about flow/balance erasure. *)
+val flow_group : ?total:'c Flow.t -> string -> 'c series item list -> 'c series item
+(** [flow_group ?total label items] is [group ?total:(Option.map flow total) label items]. *)
 
 val balance_group :
-  ?total:'c Balance.t -> string -> 'c Formula.t item list -> 'c Formula.t item
+  ?total:'c Balance.t -> string -> 'c series item list -> 'c series item
 (** [balance_group ?total label items] is
-    [group ?total:(Option.map Balance.unsafe_to_formula total) label items]. Convenience for adding
-    a group with a balance total without manually extracting the formula.
+    [group ?total:(Option.map balance total) label items]. *)
 
-    See the note on {!flow_line} about flow/balance erasure. *)
+val formula_group :
+  ?total:'c Formula.t -> string -> 'c series item list -> 'c series item
+(** [formula_group ?total label items] is
+    [group ?total:(Option.map formula total) label items]. *)
 
 (** {1:traversal Traversal} *)
 
@@ -116,16 +131,17 @@ val lines : 'a item -> (string * 'a) list
 
 (** {1:evaluation Evaluation} *)
 
-val auto_total : 'c Formula.t item -> 'c Formula.t item
-(** [auto_total item] fills in missing group totals. For each {!Group} without an explicit total,
-    synthesizes one by summing the data of its direct children: each child {!Line} contributes its
-    data, and each child {!Group} contributes its total (if any). Children with no extractable data
-    are skipped. Groups that already have a total are unchanged. Operates recursively, bottom-up.
+val auto_total : 'c series item -> 'c Formula.t item
+(** [auto_total item] converts series to formulas and fills in missing group totals. For each
+    {!Group} without an explicit total whose children are all the same kind (all flows, all
+    balances, or all formulas), synthesizes a total by summing the children. Groups with mixed
+    children skip auto-total. Groups that already have a total are unchanged. Operates recursively,
+    bottom-up.
 
     {!eval} calls this automatically before materializing. Call [auto_total] directly only to
     inspect the formula tree prior to evaluation. *)
 
-val eval : Timeline.t -> 'c Formula.t item -> float array item
+val eval : Timeline.t -> 'c series item -> float array item
 (** [eval tl item] materializes every formula in [item] against [tl].
 
     Applies {!auto_total} first, then evaluates all formulas in a single shared memoization context
@@ -133,7 +149,7 @@ val eval : Timeline.t -> 'c Formula.t item -> float array item
 
     Raises [Formula.Cycle_error] if a same-period cycle is detected. *)
 
-val eval_materialized : Timeline.t -> 'c Formula.t item -> 'c Formula.Materialized.t item
+val eval_materialized : Timeline.t -> 'c series item -> 'c Formula.Materialized.t item
 (** [eval_materialized tl item] is like {!eval} but returns {!Formula.Materialized.t} values that
     keep period bindings attached to each result array. Applies {!auto_total} first and shares a
     single memoization context.

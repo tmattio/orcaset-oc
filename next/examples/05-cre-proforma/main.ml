@@ -179,7 +179,7 @@ let _debt_balance, (debt_interest, debt_principal) =
       let interest =
         Flow.named "Interest Expense"
           (Flow.scale (-.interest_rate)
-             (Flow.mul (Balance.to_flow prev_bal) year_fracs))
+             (Flow.mul (Balance.sample prev_bal) year_fracs))
       in
       let principal = Flow.named "Principal" (Flow.sub debt_total_pmt interest) in
       let balance = Balance.roll_forward ~init:loan_amount principal in

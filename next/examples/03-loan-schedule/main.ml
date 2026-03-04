@@ -56,7 +56,7 @@ let balance, (interest_pmt, principal_pmt) =
       let interest =
         Flow.named "Interest"
           (Flow.scale (-.annual_rate)
-             (Flow.mul (Balance.to_flow prev_bal) year_fracs))
+             (Flow.mul (Balance.sample prev_bal) year_fracs))
       in
       let principal = Flow.named "Principal" (Flow.sub total_pmt interest) in
       let balance = Balance.roll_forward ~init:loan_amount principal in
@@ -65,10 +65,10 @@ let balance, (interest_pmt, principal_pmt) =
 (* Output *)
 
 let () =
-  let balance_m, principal_m = Balance.eval_with_flow tl balance ~flow:principal_pmt in
+  let balance_m = Balance.eval tl balance in
   let balance_values = Balance.Materialized.unsafe_values balance_m in
   let interest_values = Flow.eval_values tl interest_pmt in
-  let principal_values = Flow.Materialized.unsafe_values principal_m in
+  let principal_values = Flow.eval_values tl principal_pmt in
   let total_values = Flow.eval_values tl total_pmt in
 
   Printf.printf "=== Fixed-Rate Amortizing Loan Schedule ===\n";
@@ -97,7 +97,7 @@ let () =
   in
   List.iter
     (fun d ->
-      let bal = Balance.Materialized.at balance_m ~flow:principal_m d in
+      let bal = Balance.Materialized.at balance_m d in
       Printf.printf "Balance on %s: $%.2f\n" (Date.to_string d) bal)
     query_dates;
   Printf.printf "\n";

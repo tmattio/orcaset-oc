@@ -48,7 +48,7 @@ let ppe_net, depreciation =
       let depreciation =
         Flow.map ~name:"Depreciation"
           (fun ppe -> -.(ppe *. depreciation_rate /. 12.0))
-          (Balance.to_flow prev_ppe)
+          (Balance.sample prev_ppe)
       in
       let ppe_change = Flow.named "PPE Change" (Flow.add (Flow.neg capex) depreciation) in
       let ppe_net = Balance.roll_forward ~name:"PPE Net" ~init:initial_ppe ppe_change in

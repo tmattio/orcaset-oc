@@ -27,12 +27,12 @@
 type t
 (** The type for heterogeneous scopes. *)
 
-val create : unit -> t
-(** [create ()] is a fresh, unsealed, parentless scope. *)
-
-val create_child : t -> t
-(** [create_child parent] is a fresh scope whose lookups fall through to [parent] when a key is not
-    found locally. Shadowing a parent key is permitted. *)
+val create : ?imports:t list -> unit -> t
+(** [create ?imports ()] is a fresh, unsealed scope. When [imports] is provided, lookups that fail
+    locally fall through to the imported scopes. Imports are searched in order; if a key is found in
+    exactly one import (or its transitive imports), it is returned. If a key is found in multiple
+    imports, {!find} raises [Invalid_argument] (ambiguity). Shadowing an imported key with a local
+    {!define} is permitted. *)
 
 (** {1:mutation Mutation} *)
 
@@ -48,28 +48,38 @@ val seal : t -> unit
 
 val find : t -> 'a Key.t -> 'a
 (** [find scope key] is the value registered under [key]. Searches this scope first, then the
-    parent chain.
+    imported scopes transitively.
 
-    Raises [Invalid_argument] if [key] is not defined anywhere in the chain. *)
+    Raises [Invalid_argument] if [key] is not defined anywhere in the import chain.
+    Raises [Invalid_argument] if [key] is ambiguous across multiple imports. *)
 
 val find_opt : t -> 'a Key.t -> 'a option
-(** [find_opt scope key] is [Some v] if [key] is defined, [None] otherwise. Searches the parent
-    chain. *)
+(** [find_opt scope key] is [Some v] if [key] is defined, [None] otherwise. Searches the import
+    chain.
+
+    Raises [Invalid_argument] if [key] is ambiguous across multiple imports. *)
+
+val find_local : t -> 'a Key.t -> 'a option
+(** [find_local scope key] is [Some v] if [key] is defined in this scope's own entries, [None]
+    otherwise. Does not search imports. *)
 
 val mem : t -> 'a Key.t -> bool
-(** [mem scope key] is [true] if [key] is defined in this scope or any ancestor. *)
+(** [mem scope key] is [true] if [key] is defined in this scope or any import. *)
 
 val mem_local : t -> 'a Key.t -> bool
-(** [mem_local scope key] is [true] only if [key] is defined in this scope, not in a parent. *)
+(** [mem_local scope key] is [true] only if [key] is defined in this scope's own entries. *)
 
 (** {1:meta Metadata} *)
 
 val is_sealed : t -> bool
 (** [is_sealed scope] is [true] after {!seal} has been called. *)
 
+val imports : t -> t list
+(** [imports scope] is the list of imported scopes provided at {!create} time. *)
+
 val keys : t -> Key.packed list
 (** [keys scope] is the list of type-erased keys defined in this scope, in definition order. Does
-    not include parent keys. *)
+    not include imported keys. *)
 
 val size : t -> int
 (** [size scope] is the number of entries defined in this scope (not counting parent entries). *)

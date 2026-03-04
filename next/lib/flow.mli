@@ -15,7 +15,7 @@
     The {!section:algebra} ({!add}, {!sub}, {!scale}, {!neg},
     {!sum}) composes correctly through partial-period accrual.
 
-    The {!section:pointwise} ({!map}, {!map2}, {!mul}) applies
+    The {!section:cell_local} ({!map}, {!map2}, {!mul}) applies
     per-period and does {b not} commute with {!Materialized.accrue}
     in general. Use for percentage calculations, conditional logic,
     and cross-type operations (e.g. balance {e ×} year fraction).
@@ -24,6 +24,10 @@
 
 type 'c t
 (** The type for flows tagged with currency or unit ['c]. *)
+
+type split_fn = Formula.Query.split_fn
+(** The type for functions that split a period's value at a date.
+    See {!Formula.Query.split_fn}. *)
 
 val const : ?name:string -> float -> 'c t
 (** [const v] is a flow that produces [v] at every period. *)
@@ -41,10 +45,21 @@ val of_events : ?name:string -> (Date.t * float) list -> 'c t
     Raises [Invalid_argument] if any event date falls outside the
     timeline. *)
 
-val of_periods : ?name:string -> (Period.t * float) list -> 'c t
-(** [of_periods pairs] distributes period-keyed values by exact
-    period match. Multiple values for the same period are summed.
-    Unmatched periods produce [0.0]. *)
+val of_periods :
+  ?name:string ->
+  ?split_fn:split_fn ->
+  (Period.t * float) list ->
+  'c t
+(** [of_periods pairs] distributes period-keyed values into the
+    evaluation timeline using overlap-based splitting. Each source
+    period's value is allocated to evaluation periods proportionally
+    to the overlap, using [split_fn] (default: pro-rata by day
+    count).
+
+    Source periods that partially overlap an evaluation period
+    contribute only the overlapping portion. Multiple source periods
+    overlapping the same evaluation period are summed. Evaluation
+    periods with no overlap produce [0.0]. *)
 
 val growth_simple :
   ?name:string ->
@@ -95,7 +110,7 @@ val neg : 'c t -> 'c t
 val sum : ?name:string -> 'c t list -> 'c t
 (** [sum fs] is the pointwise sum of all flows in [fs]. *)
 
-(** {1:pointwise Pointwise combinators}
+(** {1:cell_local Cell-local combinators}
 
     These operations apply per-period and do {b not} compose
     through partial-period accrual: in general,
@@ -169,9 +184,33 @@ val unsafe_of_array : ?name:string -> float array -> 'c t
     periods. *)
 
 module Materialized : sig
+  (** {2 Query context}
+
+      Internal types for provenance-aware queries. Used by
+      {!Balance.Materialized} to provide intrinsic interpolation. *)
+
+  type query_ctx =
+    | Q_events of (Date.t * float) list
+    | Q_source_periods of {
+        pairs : (Period.t * float) list;
+        split_fn : Formula.Query.split_fn;
+      }
+    | Q_sum of query_ctx list
+    | Q_scale of float * query_ctx
+    | Q_neg of query_ctx
+    | Q_cell_based
+
+  val accrue_via_ctx :
+    query_ctx -> start_date:Date.t -> end_date:Date.t -> float
+  (** [accrue_via_ctx ctx ~start_date ~end_date] accrues using
+      provenance context. Raises [Exit] if [ctx] is [Q_cell_based]. *)
+
   type 'c t
   (** The type for materialized flow results. Each value is bound
       to its period. *)
+
+  val query : _ t -> query_ctx
+  (** [query m] is the provenance context of [m]. *)
 
   val make : Timeline.t -> float array -> 'c t
   (** [make tl values] binds [values] to the periods of [tl].
@@ -215,10 +254,14 @@ module Materialized : sig
     end_date:Date.t ->
     float
   (** [accrue m ~start_date ~end_date] sums the flow over the date
-      range. Periods fully contained in the range contribute their
-      whole value. Boundary periods are split by [split_fn]
-      (default: pro-rata by day count). Returns [0.0] if the date
-      range does not overlap the timeline. *)
+      range. When source provenance is available (from {!val:of_events}
+      or {!val:of_periods}), accrual uses the original source
+      boundaries for exact splitting. Provenance composes through
+      {!val:add}, {!val:sub}, {!val:scale}, {!val:neg}, and {!val:sum}.
+
+      When provenance is unavailable (cell-local combinators), falls
+      back to [split_fn] (default: pro-rata by day count). Returns
+      [0.0] if the date range does not overlap the timeline. *)
 end
 
 val eval : Timeline.t -> 'c t -> 'c Materialized.t

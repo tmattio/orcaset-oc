@@ -36,10 +36,9 @@
         let income = Flow.add revenue expense in
         let cash = Balance.roll_forward ~init:50000.0 income in
         let cash_m = Balance.eval tl cash in
-        let income_m = Flow.eval tl income in
         Printf.printf "Cash at mid-year: %.0f\n"
-          (Balance.Materialized.at cash_m
-             ~flow:income_m (Date.make 2025 7 15));
+          (Balance.Materialized.at cash_m (Date.make 2025 7 15));
+        let income_m = Flow.eval tl income in
         Printf.printf "H1 income: %.0f\n"
           (Flow.Materialized.accrue income_m
              ~start_date:start

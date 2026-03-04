@@ -16,7 +16,7 @@ open Orcaset2
 (* Assumptions *)
 
 let model_start = Date.make 2025 1 1
-let model_months = 60
+let model_months = 62
 let issuance_date = Date.make 2025 2 15
 let maturity_date = Date.make 2030 2 15
 let loan_amount = 10_000_000.0
@@ -62,7 +62,7 @@ let loan_balance, (interest_pmt, principal_pmt) =
       let interest =
         Flow.named "Interest"
           (Flow.scale (-.annual_rate)
-             (Flow.mul (Balance.to_flow prev_bal) accrual_yf))
+             (Flow.mul (Balance.sample prev_bal) accrual_yf))
       in
       let principal = Flow.named "Principal" (Flow.sub total_pmt interest) in
       let balance = Balance.roll_forward ~init:loan_amount principal in

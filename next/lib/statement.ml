@@ -9,16 +9,35 @@ type 'a item =
   | Line of { label : string; data : 'a }
   | Group of { label : string; items : 'a item list; total : 'a option }
 
+type 'c series =
+  | Flow : 'c Flow.t -> 'c series
+  | Balance : 'c Balance.t -> 'c series
+  | Formula : 'c Formula.t -> 'c series
+
 let line label data = Line { label; data }
 let group ?total label items = Group { label; items; total }
-let flow_line label f = Line { label; data = Flow.unsafe_to_formula f }
-let balance_line label b = Line { label; data = Balance.unsafe_to_formula b }
+
+let flow f = Flow f
+let balance b = Balance b
+let formula f = Formula f
+
+let to_formula : type c. c series -> c Formula.t = function
+  | Flow f -> Flow.unsafe_to_formula f
+  | Balance b -> Balance.unsafe_to_formula b
+  | Formula f -> f
+
+let flow_line label f = Line { label; data = Flow f }
+let balance_line label b = Line { label; data = Balance b }
+let formula_line label f = Line { label; data = Formula f }
 
 let flow_group ?total label items =
-  group ?total:(Option.map Flow.unsafe_to_formula total) label items
+  group ?total:(Option.map (fun t -> Flow t) total) label items
 
 let balance_group ?total label items =
-  group ?total:(Option.map Balance.unsafe_to_formula total) label items
+  group ?total:(Option.map (fun t -> Balance t) total) label items
+
+let formula_group ?total label items =
+  group ?total:(Option.map (fun t -> Formula t) total) label items
 
 (* Traversal *)
 
@@ -50,27 +69,56 @@ let lines item =
 
 (* Auto-totaling *)
 
-let direct_data = function Line { data; _ } -> Some data | Group { total; _ } -> total
+(* Classify direct children to determine whether auto-summing is safe.
+   Mixed flow/balance groups skip auto-total since the sum would be
+   semantically meaningless. *)
+type kind = All_flows | All_balances | All_formulas | Mixed
 
-(* Bottom-up: recurse into children first so nested groups have their
-   totals filled in before the parent tries to aggregate them. Only
-   synthesizes a total when one is missing; explicit totals are preserved
-   so callers can provide custom calculations (e.g. net income that
-   subtracts rather than sums). *)
-let rec auto_total item =
-  match item with
-  | Line _ -> item
+let classify_children items =
+  let tags =
+    List.filter_map
+      (fun item ->
+        match item with
+        | Line { data; _ } -> Some data
+        | Group { total; _ } -> total)
+      items
+  in
+  match tags with
+  | [] -> Mixed
+  | first :: rest ->
+      let tag = function
+        | Flow _ -> `F
+        | Balance _ -> `B
+        | Formula _ -> `R
+      in
+      let t = tag first in
+      if List.for_all (fun s -> tag s = t) rest then
+        match t with
+        | `F -> All_flows
+        | `B -> All_balances
+        | `R -> All_formulas
+      else Mixed
+
+let direct_data_formula = function
+  | Line { data; _ } -> Some data
+  | Group { total; _ } -> total
+
+let rec auto_total : type c. c series item -> c Formula.t item = function
+  | Line { label; data } -> Line { label; data = to_formula data }
   | Group { label; items; total } ->
-      let items = List.map auto_total items in
+      let kind = classify_children items in
+      let converted = List.map auto_total items in
       let total =
         match total with
-        | Some _ -> total
+        | Some t -> Some (to_formula t)
+        | None when kind = Mixed -> None
         | None -> (
-            match List.filter_map direct_data items with
+            match List.filter_map direct_data_formula converted with
             | [] -> None
-            | child_series -> Some (Formula.sum ~name:("Total " ^ label) child_series))
+            | child_formulas ->
+                Some (Formula.sum ~name:("Total " ^ label) child_formulas))
       in
-      Group { label; items; total }
+      Group { label; items = converted; total }
 
 (* Evaluation *)
 
@@ -81,12 +129,6 @@ let rec collect_series item =
       let child_series = List.concat_map collect_series items in
       match total with Some s -> s :: child_series | None -> child_series)
 
-(* Two-pass evaluation strategy:
-   1. Collect every Formula.t from the tree into a flat list
-   2. Evaluate them all at once via eval_many (shared memoization context)
-   3. Map results back into the tree using physical equality (List.assq)
-   This avoids evaluating shared sub-series multiple times and ensures
-   the entire statement is consistent against a single evaluation pass. *)
 let eval tl item =
   let item = auto_total item in
   let all_series = collect_series item in

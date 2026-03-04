@@ -26,15 +26,26 @@ val const : ?name:string -> float -> 'c t
 val init : ?name:string -> (Period.t -> float) -> 'c t
 (** [init f] is a balance that produces [f period] at each period. *)
 
-val of_dates : ?name:string -> (Date.t * float) list -> 'c t
+val of_dates :
+  ?name:string ->
+  ?before_first:float ->
+  (Date.t * float) list ->
+  'c t
 (** [of_dates observations] distributes date-keyed observations into
     periods using last-observation-wins semantics: each period takes
     the value of the most recent observation whose date falls on or
     before the period's end date. Periods before any observation
-    produce [0.0].
+    produce [before_first] (default [0.0]).
 
     Raises [Invalid_argument] if any observation date falls outside
     the timeline. *)
+
+val of_observations :
+  ?name:string ->
+  ?before_first:float ->
+  (Date.t * float) list ->
+  'c t
+(** [of_observations] is {!of_dates}. *)
 
 (** {1:bridge Bridge from Flow} *)
 
@@ -44,7 +55,9 @@ val roll_forward : ?name:string -> init:float -> 'c Flow.t -> 'c t
     - Period 0: [init + flow.(0)]
     - Period i: [result.(i-1) + flow.(i)]
 
-    This is the fundamental flow-to-balance bridge. *)
+    This is the fundamental flow-to-balance bridge. The companion
+    flow is stored intrinsically and used by {!Materialized.at} for
+    provenance-aware interpolation. *)
 
 val roll_forward_with :
   ?name:string ->
@@ -97,18 +110,19 @@ val at_period_end : 'c t -> 'c t
 (** [at_period_end b] is [b] (identity). A balance naturally
     represents the end-of-period value. *)
 
-(** {1:to_flow Bridge to Flow} *)
+(** {1:sample Bridge to Flow} *)
 
-val to_flow : ?name:string -> 'c t -> 'c Flow.t
-(** [to_flow b] reads the balance value at each period as a flow.
-    This is the primary cross-type bridge: it lets balance values
-    participate in flow arithmetic without escape hatches.
+val sample : ?name:string -> 'c t -> 'c Flow.t
+(** [sample b] reads the end-of-period balance value at each period
+    as a flow series. This is the primary cross-type bridge: it lets
+    balance values participate in flow arithmetic without escape
+    hatches.
 
-    {b Note.} The resulting flow carries the end-of-period balance
-    value in each period slot. It does {b not} have interval-quantity
-    semantics, so {!Flow.Materialized.accrue} on the result is
-    not meaningful. Use it for per-period calculations (e.g.
-    [Flow.mul (Balance.to_flow bal) year_frac]). *)
+    {b Note.} The resulting flow is a sampled point-in-time value,
+    not an interval quantity. Date-range accrual
+    ({!Flow.Materialized.accrue}) on the result is not meaningful.
+    Use it for per-period calculations (e.g.
+    [Flow.mul (Balance.sample bal) year_frac]). *)
 
 val change : 'c t -> default:float -> 'c Flow.t
 (** [change b ~default] is the per-period change in [b], as a flow.
@@ -135,7 +149,7 @@ val feedback :
         Balance.feedback ~default:loan_amount (fun prev_bal ->
             let interest =
               Flow.scale (-.rate)
-                (Flow.mul (Balance.to_flow prev_bal) year_fracs)
+                (Flow.mul (Balance.sample prev_bal) year_fracs)
             in
             let principal = Flow.sub total_pmt interest in
             let bal =
@@ -205,7 +219,7 @@ module Materialized : sig
 
   type interp =
     | Step    (** End-of-previous-period balance. *)
-    | Linear  (** Prior balance + pro-rated current-period flow. *)
+    | Series  (** Prior balance + pro-rated current-period flow. *)
   (** The type for point-in-time interpolation methods. *)
 
   val make : Timeline.t -> float array -> 'c t
@@ -247,17 +261,21 @@ module Materialized : sig
     ?interp:interp ->
     ?split_fn:Formula.Query.split_fn ->
     _ t ->
-    flow:_ Flow.Materialized.t ->
     Date.t ->
     float
-  (** [at m ~flow date] is the interpolated balance at [date].
+  (** [at m date] is the interpolated balance at [date].
 
-      When [interp] is [Linear] (the default), computes the prior
-      period's ending balance plus the portion of the current
-      period's flow that falls before [date].
+      When [interp] is [Series] (the default) and the balance was
+      created with {!val:roll_forward}, computes the prior period's
+      ending balance plus the accrued portion of the companion flow
+      up to [date], using the flow's query provenance when available.
 
-      When [interp] is [Step], returns the end-of-previous-period
-      balance (the flow is ignored).
+      When [interp] is [Step], returns the pro-rated value of the
+      enclosing period (ignoring companion flow).
+
+      For balances without a companion flow (e.g. {!val:of_dates},
+      {!val:const}), both modes fall back to period-level
+      interpolation.
 
       Raises [Invalid_argument] if [date] is outside the
       timeline. *)
@@ -265,17 +283,9 @@ end
 
 val eval : Timeline.t -> 'c t -> 'c Materialized.t
 (** [eval tl b] materializes [b] against [tl], returning a
-    {!Materialized.t} with period bindings attached. *)
-
-val eval_with_flow :
-  Timeline.t ->
-  'c t ->
-  flow:'c Flow.t ->
-  'c Materialized.t * 'c Flow.Materialized.t
-(** [eval_with_flow tl b ~flow] evaluates [b] and [flow] in a
-    shared memoization context, returning both materialized
-    results. The companion flow enables {!Materialized.at} with
-    [Linear] interpolation. *)
+    {!Materialized.t} with period bindings attached. When the
+    balance was created with {!roll_forward}, the companion flow
+    is co-evaluated for provenance-aware {!Materialized.at}. *)
 
 val eval_values : Timeline.t -> 'c t -> float array
 (** [eval_values tl b] materializes [b] against [tl] as a raw

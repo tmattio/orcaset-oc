@@ -164,9 +164,9 @@ let test_timeline () =
           Period.make ~start_date:(date 2025 1 1) ~end_date:(date 2025 2 1);
           Period.make ~start_date:(date 2025 2 5) ~end_date:(date 2025 3 1);
         |]);
-  (* of_periods_unsafe: accepts anything *)
+  (* unsafe_of_periods: accepts anything *)
   let _tl_unsafe =
-    Timeline.of_periods_unsafe
+    Timeline.unsafe_of_periods
       [|
         Period.make ~start_date:(date 2025 1 1) ~end_date:(date 2025 2 15);
         Period.make ~start_date:(date 2025 2 1) ~end_date:(date 2025 3 1);
@@ -454,7 +454,8 @@ let test_statement () =
   let expenses =
     Statement.group "Expenses"
       [
-        Statement.line "Rent" (Formula.const 2000.0); Statement.line "Salaries" (Formula.const 3000.0);
+        Statement.formula_line "Rent" (Formula.const 2000.0);
+        Statement.formula_line "Salaries" (Formula.const 3000.0);
       ]
   in
   (match
@@ -467,7 +468,10 @@ let test_statement () =
   (* eval preserves structure *)
   let income =
     Statement.group "Income"
-      [ Statement.line "Revenue" (Formula.const 1000.0); Statement.line "COGS" (Formula.const 300.0) ]
+      [
+        Statement.formula_line "Revenue" (Formula.const 1000.0);
+        Statement.formula_line "COGS" (Formula.const 300.0);
+      ]
   in
   check int "lines" 2 (List.length (Statement.lines (Statement.eval tl3 income)));
   (* pp output contains expected labels and numbers *)
@@ -475,10 +479,13 @@ let test_statement () =
   let rich =
     Statement.group "Income"
       [
-        Statement.line "Revenue" (Formula.const 1000.0);
-        Statement.group "Costs"
-          [ Statement.line "COGS" (Formula.const 300.0); Statement.line "Rent" (Formula.const 200.0) ];
-        Statement.line "Net" (Formula.const 500.0);
+        Statement.formula_line "Revenue" (Formula.const 1000.0);
+        Statement.formula_group "Costs"
+          [
+            Statement.formula_line "COGS" (Formula.const 300.0);
+            Statement.formula_line "Rent" (Formula.const 200.0);
+          ];
+        Statement.formula_line "Net" (Formula.const 500.0);
       ]
   in
   let out = to_s (fun ppf -> Statement.pp (Statement.layout tl) ppf (Statement.eval tl rich)) in
@@ -494,11 +501,12 @@ let test_statement () =
   in
   let out =
     to_s (fun ppf ->
-        Statement.pp l ppf (Statement.eval tl2 (Statement.line "Test" (Formula.const 42.0))))
+        Statement.pp l ppf
+          (Statement.eval tl2 (Statement.formula_line "Test" (Formula.const 42.0))))
   in
   check bool "custom P0" true (has "P0" out);
   check bool "custom sep" true (has "=====" out);
-  (* flow_line / balance_line convenience *)
+  (* flow_line / balance_line convenience -- mixed group skips auto_total *)
   let rev = Flow.const 1000.0 in
   let cash = Balance.const 5000.0 in
   let stmt =
@@ -507,11 +515,49 @@ let test_statement () =
   in
   let result = Statement.eval tl3 stmt in
   check int "mixed lines" 2 (List.length (Statement.lines result));
+  (* mixed group: no auto_total generated *)
+  (match
+     Statement.fold result
+       ~line_fn:(fun _ _ -> None)
+       ~group_fn:(fun _ _ total -> total)
+   with
+  | None -> () (* correct: mixed children skip auto_total *)
+  | Some _ -> fail "mixed group should not have auto_total");
+  (* flow_group with explicit total *)
+  let rev = Flow.const 1000.0 in
+  let exp = Flow.const 300.0 in
+  let flow_stmt =
+    Statement.flow_group ~total:(Flow.add rev exp) "Income"
+      [ Statement.flow_line "Revenue" rev; Statement.flow_line "Expenses" exp ]
+  in
+  (match
+     Statement.fold (Statement.eval tl3 flow_stmt)
+       ~line_fn:(fun _ _ -> None)
+       ~group_fn:(fun _ _ total -> total)
+   with
+  | Some arr -> fla "flow_group total" [| 1300.0; 1300.0; 1300.0 |] arr
+  | None -> fail "expected flow_group total");
+  (* balance_group auto_total *)
+  let bal_stmt =
+    Statement.group "Balances"
+      [ Statement.balance_line "A" (Balance.const 100.0);
+        Statement.balance_line "B" (Balance.const 200.0) ]
+  in
+  (match
+     Statement.fold (Statement.eval tl3 bal_stmt)
+       ~line_fn:(fun _ _ -> None)
+       ~group_fn:(fun _ _ total -> total)
+   with
+  | Some arr -> fla "balance auto_total" [| 300.0; 300.0; 300.0 |] arr
+  | None -> fail "expected balance auto_total");
   (* eval_materialized keeps period bindings *)
   let mat_stmt =
     Statement.eval_materialized tl3
       (Statement.group "G"
-         [ Statement.line "A" (Formula.const 7.0); Statement.line "B" (Formula.const 3.0) ])
+         [
+           Statement.formula_line "A" (Formula.const 7.0);
+           Statement.formula_line "B" (Formula.const 3.0);
+         ])
   in
   let mat_lines = Statement.lines mat_stmt in
   List.iter
@@ -834,7 +880,39 @@ let test_flow () =
   (* accrue: non-overlapping range returns 0.0 *)
   fl "accrue outside" 0.0
     (Flow.Materialized.accrue m
-       ~start_date:(date 2024 1 1) ~end_date:(date 2024 2 1))
+       ~start_date:(date 2024 1 1) ~end_date:(date 2024 2 1));
+  (* of_periods: overlap-based splitting *)
+  let wide_period = Period.make ~start_date:(date 2025 1 1) ~end_date:(date 2025 3 1) in
+  evf "of_periods overlap" tl3
+    (Flow.of_periods [ (wide_period, 590.0) ])
+    [| 310.0; 280.0; 0.0 |];
+  (* accrue with events provenance: exact date filtering *)
+  let evt_flow = Flow.of_events [ (date 2025 1 10, 100.0); (date 2025 1 20, 50.0);
+                                   (date 2025 2 5, 200.0) ] in
+  let evt_m = Flow.eval tl3 evt_flow in
+  fl "accrue events exact" 150.0
+    (Flow.Materialized.accrue evt_m
+       ~start_date:(date 2025 1 1) ~end_date:(date 2025 2 1));
+  fl "accrue events partial" 100.0
+    (Flow.Materialized.accrue evt_m
+       ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 15));
+  (* accrue with source_periods provenance *)
+  let sp_flow = Flow.of_periods [ (wide_period, 590.0) ] in
+  let sp_m = Flow.eval tl3 sp_flow in
+  fl "accrue source_periods" 310.0
+    (Flow.Materialized.accrue sp_m
+       ~start_date:(date 2025 1 1) ~end_date:(date 2025 2 1));
+  (* accrue with algebra composition preserves provenance *)
+  let sum_flow = Flow.add evt_flow sp_flow in
+  let sum_m = Flow.eval tl3 sum_flow in
+  fl "accrue algebra" (150.0 +. 310.0)
+    (Flow.Materialized.accrue sum_m
+       ~start_date:(date 2025 1 1) ~end_date:(date 2025 2 1));
+  (* accrue scale provenance *)
+  let scaled_m = Flow.eval tl3 (Flow.scale 2.0 evt_flow) in
+  fl "accrue scale" 300.0
+    (Flow.Materialized.accrue scaled_m
+       ~start_date:(date 2025 1 1) ~end_date:(date 2025 2 1))
 
 (* Balance *)
 
@@ -887,26 +965,24 @@ let test_balance () =
   (* Materialized.make length validation *)
   invalid "Balance.Materialized.make: array length does not match timeline length"
     (fun () -> ignore (Balance.Materialized.make tl3 [| 1.0; 2.0 |]));
-  (* at: Linear interpolation *)
+  (* at: Series interpolation (intrinsic companion flow) *)
   let flow = Flow.unsafe_of_array [| 100.0; 200.0; 300.0 |] in
   let bal = Balance.roll_forward ~init:1000.0 flow in
-  let bal_m, flow_m = Balance.eval_with_flow tl3 bal ~flow in
+  let bal_m = Balance.eval tl3 bal in
   fl "at jan1" 1000.0
-    (Balance.Materialized.at bal_m ~flow:flow_m (date 2025 1 1));
+    (Balance.Materialized.at bal_m (date 2025 1 1));
   fl "at feb15"
     (1100.0 +. (200.0 *. 14.0 /. 28.0))
-    (Balance.Materialized.at bal_m ~flow:flow_m (date 2025 2 15));
+    (Balance.Materialized.at bal_m (date 2025 2 15));
   fl "at end" 1600.0
-    (Balance.Materialized.at bal_m ~flow:flow_m (date 2025 4 1));
+    (Balance.Materialized.at bal_m (date 2025 4 1));
   (* at: Step interpolation pro-rates the balance value *)
   fl "at step feb15"
     (1300.0 *. 14.0 /. 28.0)
-    (Balance.Materialized.at ~interp:Step bal_m ~flow:flow_m (date 2025 2 15));
-  (* eval_with_flow: shared memoization produces correct values *)
-  fl "ewf bal 0" 1100.0 (Balance.Materialized.get bal_m 0);
-  fl "ewf flow 0" 100.0 (Flow.Materialized.get flow_m 0);
-  fl "ewf bal 2" 1600.0 (Balance.Materialized.get bal_m 2);
-  fl "ewf flow 2" 300.0 (Flow.Materialized.get flow_m 2);
+    (Balance.Materialized.at ~interp:Step bal_m (date 2025 2 15));
+  (* eval: values are correct *)
+  fl "eval bal 0" 1100.0 (Balance.Materialized.get bal_m 0);
+  fl "eval bal 2" 1600.0 (Balance.Materialized.get bal_m 2);
   (* change: balance -> flow *)
   let bal = Balance.unsafe_of_array [| 100.0; 150.0; 120.0 |] in
   let chg = Balance.change bal ~default:0.0 in
@@ -928,6 +1004,14 @@ let test_balance () =
   evb "of_dates forward fill" tl3
     (Balance.of_dates [ (date 2025 2 15, 500.0) ])
     [| 0.0; 500.0; 500.0 |];
+  (* of_dates: before_first *)
+  evb "of_dates before_first" tl3
+    (Balance.of_dates ~before_first:42.0 [ (date 2025 2 15, 500.0) ])
+    [| 42.0; 500.0; 500.0 |];
+  (* of_observations alias *)
+  evb "of_observations" tl3
+    (Balance.of_observations [ (date 2025 1 15, 100.0); (date 2025 2 10, 200.0) ])
+    [| 100.0; 200.0; 200.0 |];
   (* of_dates: out-of-range raises *)
   invalid "Balance.of_dates: observation date 2024-01-01 is outside the timeline"
     (fun () -> ignore (Balance.eval_values tl3
@@ -935,7 +1019,7 @@ let test_balance () =
   (* feedback: interest accrual on previous balance *)
   let balance2, interest =
     Balance.feedback ~default:100.0 (fun prev_bal ->
-        let interest = Flow.map (fun b -> b *. 0.01) (Balance.to_flow prev_bal) in
+        let interest = Flow.map (fun b -> b *. 0.01) (Balance.sample prev_bal) in
         let balance = Balance.roll_forward ~init:100.0 interest in
         (balance, (balance, interest)))
   in
@@ -1040,7 +1124,7 @@ let test_scope () =
   let kp : float Key.t = Key.make "Rate" in
   Scope.define parent kp 0.065;
   Scope.seal parent;
-  let child = Scope.create_child parent in
+  let child = Scope.create ~imports:[ parent ] () in
   let kc : int Key.t = Key.make "Term" in
   Scope.define child kc 360;
   fl "parent lookup" 0.065 (Scope.find child kp);
@@ -1049,12 +1133,37 @@ let test_scope () =
   check bool "mem_local parent key" false (Scope.mem_local child kp);
   check bool "mem_local child key" true (Scope.mem_local child kc);
   (* shadow parent *)
-  let shadow = Scope.create_child parent in
+  let shadow = Scope.create ~imports:[ parent ] () in
   let kp2 : float Key.t = Key.make "Rate" in
   Scope.define shadow kp 0.05;
   fl "shadow" 0.05 (Scope.find shadow kp);
   fl "parent unchanged" 0.065 (Scope.find parent kp);
-  ignore kp2
+  ignore kp2;
+  (* multi-import *)
+  let s1 = Scope.create () in
+  let s2 = Scope.create () in
+  let ka : int Key.t = Key.make "X" in
+  let kb : int Key.t = Key.make "Y" in
+  Scope.define s1 ka 10;
+  Scope.define s2 kb 20;
+  let multi = Scope.create ~imports:[ s1; s2 ] () in
+  check int "multi import s1" 10 (Scope.find multi ka);
+  check int "multi import s2" 20 (Scope.find multi kb);
+  check int "imports count" 2 (List.length (Scope.imports multi));
+  (* ambiguity detection *)
+  let s3 = Scope.create () in
+  let s4 = Scope.create () in
+  let kz : int Key.t = Key.make "Z" in
+  Scope.define s3 kz 1;
+  Scope.define s4 kz 2;
+  let ambig = Scope.create ~imports:[ s3; s4 ] () in
+  invalid "Scope.find: key Z is ambiguous across imports"
+    (fun () -> ignore (Scope.find ambig kz));
+  (* local shadows import *)
+  let sl = Scope.create ~imports:[ s3 ] () in
+  Scope.define sl kz 99;
+  check int "local shadows" 99 (Scope.find sl kz);
+  check (option int) "find_local" (Some 99) (Scope.find_local sl kz)
 
 (* Run *)
 
