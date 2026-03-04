@@ -58,11 +58,17 @@ val group : ?total:'a -> string -> 'a item list -> 'a item
 
 val flow_line : string -> 'c Flow.t -> 'c Formula.t item
 (** [flow_line label f] is [line label (Flow.formula f)]. Convenience for adding a flow to a
-    statement without manually extracting the formula. *)
+    statement without manually extracting the formula.
+
+    {b Note.} The flow/balance distinction is erased: the statement tree holds {!Formula.t} values.
+    This means {!auto_total} sums all children uniformly. Mixing flows and balances in the same
+    group is permitted but the total loses semantic meaning. *)
 
 val balance_line : string -> 'c Balance.t -> 'c Formula.t item
 (** [balance_line label b] is [line label (Balance.formula b)]. Convenience for adding a balance to
-    a statement without manually extracting the formula. *)
+    a statement without manually extracting the formula.
+
+    See the note on {!flow_line} about flow/balance erasure. *)
 
 (** {1:traversal Traversal} *)
 
