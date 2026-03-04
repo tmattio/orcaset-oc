@@ -127,6 +127,26 @@ val feedback :
             (bal, (interest, principal)))
     ]} *)
 
+val fixpoint :
+  ?name:string ->
+  ?tol:float ->
+  ?max_iter:int ->
+  guess:float ->
+  ('c t -> 'c t) ->
+  'c t
+(** [fixpoint ~guess f] finds the value [x] at each period such
+    that [f (const x)] converges to [x] (within [tol]).
+
+    Use this for same-period circular dependencies where the
+    balance depends on itself within the same period (e.g. LTC
+    construction loans where interest capitalizes into the
+    balance).
+
+    [tol] defaults to [1e-10]. [max_iter] defaults to [100].
+
+    Raises [Formula.Convergence_error] if [max_iter] iterations
+    are exhausted. *)
+
 (** {1:escape Escape hatches} *)
 
 val formula : 'c t -> 'c Formula.t

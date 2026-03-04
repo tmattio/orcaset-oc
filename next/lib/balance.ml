@@ -52,6 +52,11 @@ let feedback ?name ~default f =
     let (B def), exposed = f (B prev_formula) in
     (def, exposed))
 
+let fixpoint ?name ?tol ?max_iter ~guess f =
+  B (Formula.fixpoint ?name ?tol ?max_iter ~guess (fun var ->
+    let (B body) = f (B var) in
+    body))
+
 (* Escape hatches *)
 
 let formula (B s) = s

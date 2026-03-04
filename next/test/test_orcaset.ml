@@ -827,7 +827,23 @@ let test_balance () =
   let vi = Flow.eval tl3 interest in
   fl "fb bal[0]" 101.0 vb2.(0);
   fl "fb int[0]" 1.0 vi.(0);
-  fl "fb int[1]" 1.01 vi.(1)
+  fl "fb int[1]" 1.01 vi.(1);
+  (* fixpoint: LTC construction loan pattern *)
+  let ltc = 0.8 and rate = 0.05 in
+  let base_cost = Balance.of_array [| 1000.0; 2000.0; 3000.0 |] in
+  let loan =
+    Balance.fixpoint ~guess:0.0 (fun commitment ->
+        Balance.map2 (fun bc c -> ltc *. (bc +. rate *. c))
+          base_cost commitment)
+  in
+  let lv = Balance.eval tl3 loan in
+  let expected i =
+    let bc = [| 1000.0; 2000.0; 3000.0 |].(i) in
+    ltc *. bc /. (1.0 -. (ltc *. rate))
+  in
+  fl "fix[0]" (expected 0) lv.(0);
+  fl "fix[1]" (expected 1) lv.(1);
+  fl "fix[2]" (expected 2) lv.(2)
 
 (* Integration: coffee shop model *)
 
