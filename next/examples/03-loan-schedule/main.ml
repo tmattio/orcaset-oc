@@ -37,7 +37,7 @@ let total_pmt = Series.const (-.monthly_payment)
 
 (* Year Fractions *)
 
-let year_fracs = Series.year_frac ~name:"Year Fracs" Daycount.thirty_360
+let year_fracs = Series.year_frac ~name:"Year Fracs" Daycount.thirty_360_us
 
 (* Loan Amortization *)
 

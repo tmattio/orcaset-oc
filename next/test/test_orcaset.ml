@@ -157,14 +157,14 @@ let test_daycount () =
   (* actual/360 *)
   fl "a360 half" (181.0 /. 360.0) (Daycount.actual_360 (date 2025 1 1) (date 2025 7 1));
   (* 30/360 *)
-  fl "30/360" (28.0 /. 360.0) (Daycount.thirty_360 (date 2025 1 30) (date 2025 2 28));
+  fl "30/360" (28.0 /. 360.0) (Daycount.thirty_360_us (date 2025 1 30) (date 2025 2 28));
   (* 30/360 symmetry *)
-  let yf = Daycount.thirty_360 (date 2025 1 1) (date 2025 7 1) in
-  fl "30/360 neg" (-.yf) (Daycount.thirty_360 (date 2025 7 1) (date 2025 1 1));
+  let yf = Daycount.thirty_360_us (date 2025 1 1) (date 2025 7 1) in
+  fl "30/360 neg" (-.yf) (Daycount.thirty_360_us (date 2025 7 1) (date 2025 1 1));
   (* 30/360 edge cases *)
-  fl "feb eom+31" (30.0 /. 360.0) (Daycount.thirty_360 (date 2025 2 28) (date 2025 3 31));
-  fl "both feb eom" (360.0 /. 360.0) (Daycount.thirty_360 (date 2024 2 29) (date 2025 2 28));
-  fl "31 to 31" (60.0 /. 360.0) (Daycount.thirty_360 (date 2025 1 31) (date 2025 3 31));
+  fl "feb eom+31" (30.0 /. 360.0) (Daycount.thirty_360_us (date 2025 2 28) (date 2025 3 31));
+  fl "both feb eom" (360.0 /. 360.0) (Daycount.thirty_360_us (date 2024 2 29) (date 2025 2 28));
+  fl "31 to 31" (60.0 /. 360.0) (Daycount.thirty_360_us (date 2025 1 31) (date 2025 3 31));
   (* actual/365 *)
   fl "a365 half" (181.0 /. 365.0) (Daycount.actual_365 (date 2025 1 1) (date 2025 7 1));
   fl "a365 sym" (-.(181.0 /. 365.0)) (Daycount.actual_365 (date 2025 7 1) (date 2025 1 1));
@@ -360,9 +360,9 @@ let test_series_growth () =
   let yf2 = Daycount.actual_360 sd (date 2025 3 1) in
   fl "compound p2" (1000.0 *. ((1.0 +. 0.10) ** yf2)) v.(2);
   (* year_frac: matches daycount applied to each period *)
-  let v = Series.eval tl3 (Series.year_frac Daycount.thirty_360) in
-  fl "yf jan" (Daycount.thirty_360 (date 2025 1 1) (date 2025 2 1)) v.(0);
-  fl "yf feb" (Daycount.thirty_360 (date 2025 2 1) (date 2025 3 1)) v.(1)
+  let v = Series.eval tl3 (Series.year_frac Daycount.thirty_360_us) in
+  fl "yf jan" (Daycount.thirty_360_us (date 2025 1 1) (date 2025 2 1)) v.(0);
+  fl "yf feb" (Daycount.thirty_360_us (date 2025 2 1) (date 2025 3 1)) v.(1)
 
 (* Series: query *)
 

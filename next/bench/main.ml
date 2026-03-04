@@ -132,7 +132,7 @@ let daycount_benchmarks =
   in
   [
     { name = "actual_360"; f = repeat Daycount.actual_360 };
-    { name = "thirty_360"; f = repeat Daycount.thirty_360 };
+    { name = "thirty_360"; f = repeat Daycount.thirty_360_us };
     { name = "calendar_monthly"; f = repeat Daycount.calendar_monthly };
   ]
 
@@ -197,7 +197,7 @@ let loan_bench n () =
   let tl = Timeline.monthly ~start_date:start ~n in
   let pmt = monthly_payment ~amount:loan_amount ~rate:annual_rate ~term:n in
   let total_pmt = Series.const (-.pmt) in
-  let year_fracs = Series.year_frac Daycount.thirty_360 in
+  let year_fracs = Series.year_frac Daycount.thirty_360_us in
   let balance, (interest, principal) =
     Series.feedback ~default:loan_amount (fun prev_bal ->
         let interest = Series.scale (-.annual_rate) (Series.mul prev_bal year_fracs) in

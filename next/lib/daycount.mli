@@ -15,7 +15,7 @@
 
 val actual_360 : Date.t -> Date.t -> float
 (** [actual_360 d0 d1] is the actual number of calendar days between [d0] and [d1] divided by 360.
-    The simplest convention; see also {!thirty_360} and {!calendar_monthly}. *)
+    The simplest convention; see also {!thirty_360_us} and {!calendar_monthly}. *)
 
 val actual_365 : Date.t -> Date.t -> float
 (** [actual_365 d0 d1] is the actual number of calendar days between [d0] and [d1] divided by 365.
@@ -29,10 +29,10 @@ val actual_actual_isda : Date.t -> Date.t -> float
     [actual_days / days_in_year]. For intervals spanning multiple years, the contributions of each
     year are summed. *)
 
-val thirty_360 : Date.t -> Date.t -> float
-(** [thirty_360 d0 d1] is the year fraction under the 30/360 convention (NASD / US Bond Basis
-    method). Each month is treated as 30 days and each year as 360 days, with end-of-month
-    adjustments applied as a cascade where each rule's output feeds the next:
+val thirty_360_us : Date.t -> Date.t -> float
+(** [thirty_360_us d0 d1] is the year fraction under the 30/360 US convention (NASD / Bond Basis).
+    Each month is treated as 30 days and each year as 360 days, with end-of-month adjustments
+    applied as a cascade where each rule's output feeds the next:
 
     + If the start day is 31, it becomes 30.
     + If the start date falls on February month-end, the start day becomes 30.
@@ -49,4 +49,4 @@ val calendar_monthly : Date.t -> Date.t -> float
 
     This ensures exact results at month boundaries: Jan 1 to Feb 1 is exactly 1/12, Jan 1 to Jul 1
     is exactly 1/2, and Jan 1 to Jan 1 next year is exactly 1.0. See also {!actual_360} and
-    {!thirty_360}. *)
+    {!thirty_360_us}. *)

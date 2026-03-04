@@ -26,7 +26,7 @@ let actual_360 dt1 dt2 = float_of_int (Date.diff dt2 dt1) /. 360.0
    4. If d2 = 31 and (adjusted) d1 >= 30, set d2 = 30
    The final formula uses a "30/360 epoch" (y*360 + m*30 + d) to compute
    the day difference in the fictitious 30-day-month calendar. *)
-let thirty_360 =
+let thirty_360_us =
   let forward dt1 dt2 =
     let y1 = Date.year dt1 in
     let m1 = Date.month dt1 in
