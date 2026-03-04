@@ -21,8 +21,26 @@ let monthly ~start_date ~n = make ~start_date ~offset:(Period.make_offset ~month
 let quarterly ~start_date ~n = make ~start_date ~offset:(Period.make_offset ~quarters:1 ()) ~n
 let yearly ~start_date ~n = make ~start_date ~offset:(Period.make_offset ~years:1 ()) ~n
 
+let validate_periods periods =
+  let n = Array.length periods in
+  for i = 1 to n - 1 do
+    let prev_end = Period.end_date periods.(i - 1) in
+    let cur_start = Period.start_date periods.(i) in
+    if Date.(cur_start < prev_end) then
+      invalid_arg
+        (Printf.sprintf "Timeline.of_periods: period %d overlaps period %d" i (i - 1));
+    if Date.(cur_start > prev_end) then
+      invalid_arg
+        (Printf.sprintf "Timeline.of_periods: gap between period %d and %d" (i - 1) i)
+  done
+
 let of_periods periods =
   if Array.length periods = 0 then invalid_arg "Timeline.of_periods: empty array";
+  validate_periods periods;
+  { periods = Array.copy periods }
+
+let of_periods_unsafe periods =
+  if Array.length periods = 0 then invalid_arg "Timeline.of_periods_unsafe: empty array";
   { periods = Array.copy periods }
 
 let length tl = Array.length tl.periods

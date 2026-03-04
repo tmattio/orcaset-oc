@@ -149,7 +149,30 @@ let test_timeline () =
   oi "after" None (Timeline.find_index tl (date 2026 1 2));
   (* invalid *)
   invalid "Timeline.make: n must be positive" (fun () ->
-      Timeline.monthly ~start_date:(date 2025 1 1) ~n:0)
+      Timeline.monthly ~start_date:(date 2025 1 1) ~n:0);
+  (* of_periods: overlapping rejected *)
+  invalid "Timeline.of_periods: period 1 overlaps period 0" (fun () ->
+      Timeline.of_periods
+        [|
+          Period.make ~start_date:(date 2025 1 1) ~end_date:(date 2025 2 15);
+          Period.make ~start_date:(date 2025 2 1) ~end_date:(date 2025 3 1);
+        |]);
+  (* of_periods: gap rejected *)
+  invalid "Timeline.of_periods: gap between period 0 and 1" (fun () ->
+      Timeline.of_periods
+        [|
+          Period.make ~start_date:(date 2025 1 1) ~end_date:(date 2025 2 1);
+          Period.make ~start_date:(date 2025 2 5) ~end_date:(date 2025 3 1);
+        |]);
+  (* of_periods_unsafe: accepts anything *)
+  let _tl_unsafe =
+    Timeline.of_periods_unsafe
+      [|
+        Period.make ~start_date:(date 2025 1 1) ~end_date:(date 2025 2 15);
+        Period.make ~start_date:(date 2025 2 1) ~end_date:(date 2025 3 1);
+      |]
+  in
+  ()
 
 (* Daycount *)
 

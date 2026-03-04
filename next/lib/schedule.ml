@@ -105,8 +105,8 @@ let unadjusted_periods s = make_periods s.unadjusted
 
 (* Conversion *)
 
-let to_timeline s = Timeline.of_periods (periods s)
-let to_unadjusted_timeline s = Timeline.of_periods (unadjusted_periods s)
+let to_timeline s = Timeline.of_periods_unsafe (periods s)
+let to_unadjusted_timeline s = Timeline.of_periods_unsafe (unadjusted_periods s)
 
 let to_events ?(at = `Start) f s =
   let ps = periods s in
