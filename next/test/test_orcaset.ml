@@ -665,7 +665,11 @@ let test_schedule () =
   invalid "Schedule.make: end_date must be after start_date" (fun () ->
       Schedule.make ~start_date:(date 2025 6 1) ~end_date:(date 2025 1 1) ~offset:qoffset ());
   invalid "Schedule.make: end_date must be after start_date" (fun () ->
-      Schedule.make ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 1) ~offset:qoffset ())
+      Schedule.make ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 1) ~offset:qoffset ());
+  (* Error: zero offset *)
+  invalid "Schedule.make: offset must advance by at least one day or month" (fun () ->
+      Schedule.make ~start_date:(date 2025 1 1) ~end_date:(date 2025 7 1)
+        ~offset:(Period.make_offset ()) ())
 
 (* Integration: coffee shop model *)
 

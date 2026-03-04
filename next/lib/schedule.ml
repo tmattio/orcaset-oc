@@ -65,6 +65,12 @@ let make ~start_date ~end_date ~offset ?(roll = Same_day) ?(stub = Short_first)
     ?(bdc = Calendar.Unadjusted) ?(calendar = Calendar.weekdays) () =
   if Date.(end_date <= start_date) then
     invalid_arg "Schedule.make: end_date must be after start_date";
+  let total_months =
+    offset.Period.months + (offset.quarters * 3) + (offset.years * 12)
+  in
+  let total_days = offset.days + (offset.weeks * 7) in
+  if total_months <= 0 && total_days <= 0 then
+    invalid_arg "Schedule.make: offset must advance by at least one day or month";
   let dates, has_stub =
     match stub with
     | Short_first | Long_first -> gen_backward offset roll ~start_date ~end_date
