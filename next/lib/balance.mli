@@ -89,6 +89,13 @@ val at_period_end : 'a -> 'c t -> 'c t
     represents the end-of-period value. The first argument is
     ignored; it exists for symmetry with {!at_period_start}. *)
 
+(** {1:to_flow Bridge to Flow} *)
+
+val change : 'c t -> default:float -> 'c Flow.t
+(** [change b ~default] is the per-period change in [b], as a flow.
+    At period 0, the change is [b.(0) - default]. At period [i > 0],
+    the change is [b.(i) - b.(i-1)]. *)
+
 (** {1:escape Escape hatches} *)
 
 val formula : 'c t -> 'c Formula.t

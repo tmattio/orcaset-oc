@@ -39,6 +39,12 @@ let prev ?name (B src) ~default = B (Formula.prev ?name src ~default)
 let at_period_start ?name b ~default = prev ?name b ~default
 let at_period_end _ b = b
 
+(* Bridge to Flow *)
+
+let change (B s) ~default =
+  let prev_s = Formula.prev s ~default in
+  Flow.of_formula (Formula.sub s prev_s)
+
 (* Escape hatches *)
 
 let formula (B s) = s

@@ -804,7 +804,16 @@ let test_balance () =
   (* eval_materialized *)
   let m = Balance.eval_materialized tl3 a in
   check int "mat length" 3 (Formula.Materialized.length m);
-  fl "mat get 1" 20.0 (Formula.Materialized.get m 1)
+  fl "mat get 1" 20.0 (Formula.Materialized.get m 1);
+  (* change: balance -> flow *)
+  let bal = Balance.of_array [| 100.0; 150.0; 120.0 |] in
+  let chg = Balance.change bal ~default:0.0 in
+  fla "change" [| 100.0; 50.0; -30.0 |] (Flow.eval tl3 chg);
+  (* roundtrip: roll_forward (change b) ~ b when default = init *)
+  let flow2 = Flow.of_array [| 10.0; 20.0; 30.0 |] in
+  let bal2 = Balance.roll_forward ~init:0.0 flow2 in
+  let chg2 = Balance.change bal2 ~default:0.0 in
+  fla "roundtrip change" [| 10.0; 20.0; 30.0 |] (Flow.eval tl3 chg2)
 
 (* Integration: coffee shop model *)
 
