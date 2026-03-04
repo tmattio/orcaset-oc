@@ -12,13 +12,60 @@ type 'c t = B of 'c Formula.t [@@unboxed]
 let const ?name v = B (Formula.const ?name v)
 let init ?name f = B (Formula.init_flow ?name f)
 
+let of_dates ?name observations =
+  let sorted =
+    List.sort (fun (d1, _) (d2, _) -> Date.compare d1 d2) observations
+  in
+  let cache = ref None in
+  B (Formula.init_tl ?name (fun tl i _period ->
+    let bins =
+      match !cache with
+      | Some (cached_tl, bins) when cached_tl == tl -> bins
+      | _ ->
+          let n = Timeline.length tl in
+          let bins = Array.make n 0.0 in
+          let tl_start = Period.start_date (Timeline.get tl 0) in
+          let tl_end =
+            Period.end_date (Timeline.get tl (n - 1))
+          in
+          List.iter (fun (d, _) ->
+            if Date.compare d tl_start < 0 ||
+               Date.compare d tl_end > 0 then
+              invalid_arg
+                (Printf.sprintf
+                   "Balance.of_dates: observation date %s \
+                    is outside the timeline"
+                   (Date.to_string d)))
+            sorted;
+          (* Last-observation-wins: for each period, take the
+             value of the most recent observation ≤ period end *)
+          let last_val = ref 0.0 in
+          let obs = ref sorted in
+          for j = 0 to n - 1 do
+            let period_end =
+              Period.end_date (Timeline.get tl j)
+            in
+            let rec drain = function
+              | (d, v) :: rest when Date.compare d period_end <= 0 ->
+                  last_val := v;
+                  drain rest
+              | remaining -> obs := remaining
+            in
+            drain !obs;
+            bins.(j) <- !last_val
+          done;
+          cache := Some (tl, bins);
+          bins
+    in
+    bins.(i)))
+
 (* Bridge from Flow *)
 
 let roll_forward ?name ~init flow =
-  B (Formula.cumsum ?name ~init (Flow.formula flow))
+  B (Formula.cumsum ?name ~init (Flow.unsafe_to_formula flow))
 
 let roll_forward_with ?name ~init f flow =
-  B (Formula.scan ?name ~init f (Flow.formula flow))
+  B (Formula.scan ?name ~init f (Flow.unsafe_to_formula flow))
 
 (* Naming *)
 
@@ -31,6 +78,7 @@ let sub (B a) (B b) = B (Formula.sub a b)
 let scale k (B s) = B (Formula.scale k s)
 let map ?name f (B s) = B (Formula.map ?name f s)
 let map2 ?name f (B a) (B b) = B (Formula.map2 ?name f a b)
+let mul (B a) (B b) = B (Formula.mul a b)
 
 (* Cross-period *)
 
@@ -40,9 +88,13 @@ let at_period_end b = b
 
 (* Bridge to Flow *)
 
+let to_flow ?name (B s) =
+  let s = match name with Some n -> Formula.named n s | None -> s in
+  Flow.unsafe_of_formula s
+
 let change (B s) ~default =
   let prev_s = Formula.prev s ~default in
-  Flow.of_formula (Formula.sub s prev_s)
+  Flow.unsafe_of_formula (Formula.sub s prev_s)
 
 (* Feedback *)
 
@@ -56,11 +108,15 @@ let fixpoint ?name ?tol ?max_iter ~guess f =
     let (B body) = f (B var) in
     body))
 
-(* Escape hatches *)
+(* Currency conversion *)
 
-let formula (B s) = s
-let of_formula s = B s
-let of_array ?name arr = B (Formula.of_array ?name arr)
+let convert ~rate (B s) = B (Formula.convert ~rate s)
+
+(* Unsafe escape hatches *)
+
+let unsafe_to_formula (B s) = s
+let unsafe_of_formula s = B s
+let unsafe_of_array ?name arr = B (Formula.of_array ?name arr)
 
 (* Materialized *)
 
@@ -119,7 +175,7 @@ let eval tl (B s) =
   { Materialized.timeline = tl; values }
 
 let eval_with_flow tl (B s) ~flow =
-  let flow_formula = Flow.formula flow in
+  let flow_formula = Flow.unsafe_to_formula flow in
   match Formula.eval_many tl [ s; flow_formula ] with
   | [ bal_arr; flow_arr ] ->
       let bal_mat = Materialized.make tl bal_arr in

@@ -10,11 +10,15 @@
     The natural query is "how much over a date range?", answered by
     {!Materialized.accrue}.
 
-    The algebra is restricted to operations that compose correctly
-    through partial-period accrual: {!add}, {!sub}, {!scale},
-    {!neg}, {!sum}. For pointwise operations ({!Formula.map},
-    {!Formula.mul}, etc.) drop to {!formula} and work at the
-    {!Formula} level.
+    {2 Algebra}
+
+    The {!section:algebra} ({!add}, {!sub}, {!scale}, {!neg},
+    {!sum}) composes correctly through partial-period accrual.
+
+    The {!section:pointwise} ({!map}, {!map2}, {!mul}) applies
+    per-period and does {b not} commute with {!Materialized.accrue}
+    in general. Use for percentage calculations, conditional logic,
+    and cross-type operations (e.g. balance {e ×} year fraction).
 
     {1:constructors Constructors} *)
 
@@ -91,21 +95,68 @@ val neg : 'c t -> 'c t
 val sum : ?name:string -> 'c t list -> 'c t
 (** [sum fs] is the pointwise sum of all flows in [fs]. *)
 
-(** {1:escape Escape hatches} *)
+(** {1:pointwise Pointwise combinators}
 
-val formula : 'c t -> 'c Formula.t
-(** [formula f] is the underlying {!Formula.t}. Use this to drop
-    to the grid-local formula layer for operations like
-    {!Formula.map}, {!Formula.mul}, or {!Formula.prev}. *)
+    These operations apply per-period and do {b not} compose
+    through partial-period accrual: in general,
+    [f(accrue(flow))] {e !=} [accrue(map(f, flow))]. Use them
+    for percentage calculations, conditional logic, and
+    cross-type operations where period-level semantics suffice. *)
 
-val of_formula : 'c Formula.t -> 'c t
-(** [of_formula s] wraps [s] as a flow. The caller asserts that
-    [s] has flow semantics (interval quantities). *)
+val map : ?name:string -> (float -> float) -> 'c t -> 'c t
+(** [map f flow] applies [f] to each period's value. *)
 
-val of_array : ?name:string -> float array -> 'c t
-(** [of_array arr] is a flow that produces [arr.(i)] at period [i].
-    Periods beyond [Array.length arr] produce [0.0]. The array is
-    captured by reference and must not be mutated after the call.
+val map2 :
+  ?name:string ->
+  (float -> float -> float) ->
+  'c t ->
+  'c t ->
+  'c t
+(** [map2 f a b] applies [f] to the values of [a] and [b] at
+    each period. *)
+
+val mul : 'c t -> 'c t -> 'c t
+(** [mul a b] is the pointwise product of [a] and [b]. *)
+
+(** {1:cross_period Cross-period} *)
+
+val prev : ?name:string -> 'c t -> default:float -> 'c t
+(** [prev f ~default] produces [default] at period 0 and
+    [f.(i-1)] at period [i > 0]. *)
+
+val scan :
+  ?name:string ->
+  init:float ->
+  (acc:float -> x:float -> float) ->
+  'c t ->
+  'c t
+(** [scan ~init f flow] produces a running accumulation:
+    - Period 0: [f ~acc:init ~x:flow.(0)]
+    - Period i: [f ~acc:result.(i-1) ~x:flow.(i)] *)
+
+(** {1:convert Currency conversion} *)
+
+val convert : rate:float -> 'c1 t -> 'c2 t
+(** [convert ~rate f] scales [f] by [rate] and changes the
+    currency tag. *)
+
+(** {1:unsafe Unsafe escape hatches}
+
+    These operations drop to the untyped {!Formula.t} layer.
+    Prefer the safe API above for new code. *)
+
+val unsafe_to_formula : 'c t -> 'c Formula.t
+(** [unsafe_to_formula f] is the underlying {!Formula.t}. *)
+
+val unsafe_of_formula : 'c Formula.t -> 'c t
+(** [unsafe_of_formula s] wraps [s] as a flow. The caller asserts
+    that [s] has flow semantics (interval quantities). *)
+
+val unsafe_of_array : ?name:string -> float array -> 'c t
+(** [unsafe_of_array arr] is a flow that produces [arr.(i)] at
+    period [i]. Periods beyond [Array.length arr] produce [0.0].
+    The array is captured by reference and must not be mutated
+    after the call.
 
     Prefer {!init} or {!of_events} for new code. *)
 

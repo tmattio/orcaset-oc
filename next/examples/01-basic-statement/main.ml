@@ -11,7 +11,7 @@
 
     Key patterns demonstrated:
     - [Flow.t] for all revenue and expense line items.
-    - [Formula.prev] + [Formula.map] via escape hatch for cross-period dependency.
+    - [Flow.prev] + [Flow.map] for cross-period dependency.
     - [Statement.flow_line] for typed statement construction. *)
 
 open Orcaset2
@@ -47,16 +47,14 @@ let opex_total = Flow.sum ~name:"OpEx Total" [ cogs; admin ]
 
 (* Revenue (Continued) *)
 
-(* Formula.prev shifts a series forward by one period, producing ~default
-   at period 0. Combined with Formula.map, this lets services revenue
-   depend on the *prior* period's OpEx without introducing a same-period
-   cycle. Period 0 falls back to a fixed estimate since there is no
-   prior OpEx yet. The result is wrapped back into a Flow via escape hatch. *)
+(* Flow.prev shifts a flow forward by one period, producing ~default at
+   period 0. Combined with Flow.map, this lets services revenue depend on
+   the *prior* period's OpEx without introducing a same-period cycle.
+   Period 0 falls back to a fixed estimate since there is no prior OpEx yet. *)
 let services =
-  Flow.of_formula
-    (Formula.map ~name:"Services"
-       (fun prev_opex -> if prev_opex = 0.0 then 500.0 else prev_opex *. services_multiple_opex)
-       (Formula.prev (Flow.formula opex_total) ~default:0.0))
+  Flow.map ~name:"Services"
+    (fun prev_opex -> if prev_opex = 0.0 then 500.0 else prev_opex *. services_multiple_opex)
+    (Flow.prev opex_total ~default:0.0)
 
 let revenue_total = Flow.named "Revenue Total" (Flow.add software services)
 
@@ -90,6 +88,6 @@ let () =
   (* Dependency graph *)
   let oc = open_out "model.dot" in
   let ppf = Format.formatter_of_out_channel oc in
-  Formula.Deps.pp_dot ppf [ Flow.formula income ];
+  Formula.Deps.pp_dot ppf [ Flow.unsafe_to_formula income ];
   Format.pp_print_flush ppf ();
   close_out oc

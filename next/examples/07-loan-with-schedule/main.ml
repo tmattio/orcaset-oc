@@ -50,7 +50,7 @@ let quarterly_payment =
    from the contractual coupon date to the next, regardless of weekend shifts. *)
 let accrual_yf =
   let unadj_periods = Schedule.unadjusted_periods loan_sched in
-  Flow.of_formula
+  Flow.unsafe_of_formula
     (Formula.init ~name:"Year Fracs" (fun i _p ->
          let up = unadj_periods.(i) in
          Daycount.actual_360 (Period.start_date up) (Period.end_date up)))
@@ -60,10 +60,9 @@ let total_pmt = Flow.const ~name:"Quarterly Payment" (-.quarterly_payment)
 let loan_balance, (interest_pmt, principal_pmt) =
   Balance.feedback ~name:"Loan Balance" ~default:loan_amount (fun prev_bal ->
       let interest =
-        Flow.of_formula
-          (Formula.named "Interest"
-             (Formula.scale (-.annual_rate)
-                (Formula.mul (Balance.formula prev_bal) (Flow.formula accrual_yf))))
+        Flow.named "Interest"
+          (Flow.scale (-.annual_rate)
+             (Flow.mul (Balance.to_flow prev_bal) accrual_yf))
       in
       let principal = Flow.named "Principal" (Flow.sub total_pmt interest) in
       let balance = Balance.roll_forward ~init:loan_amount principal in
@@ -161,7 +160,7 @@ let () =
         flow_line "Revenue" revenue;
         flow_line "Operating Expenses" opex;
         flow_line "NOI" noi;
-        group ~total:(Flow.formula monthly_debt_service) "Debt Service"
+        flow_group ~total:monthly_debt_service "Debt Service"
           [ flow_line "Interest" monthly_interest; flow_line "Principal" monthly_principal ];
         flow_line "CFAF" cfaf;
         balance_line "Cash Balance" cash;
@@ -179,6 +178,6 @@ let () =
   (* Dependency graph *)
   let oc = open_out "model.dot" in
   let ppf = Format.formatter_of_out_channel oc in
-  Formula.Deps.pp_dot ppf [ Flow.formula cfaf; Balance.formula cash ];
+  Formula.Deps.pp_dot ppf [ Flow.unsafe_to_formula cfaf; Balance.unsafe_to_formula cash ];
   Format.pp_print_flush ppf ();
   close_out oc

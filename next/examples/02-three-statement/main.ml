@@ -46,10 +46,9 @@ let capex = Flow.named "CapEx" (Flow.scale (-.capex_pct) revenue)
 let ppe_net, depreciation =
   Balance.feedback ~default:initial_ppe (fun prev_ppe ->
       let depreciation =
-        Flow.of_formula
-          (Formula.map ~name:"Depreciation"
-             (fun ppe -> -.(ppe *. depreciation_rate /. 12.0))
-             (Balance.formula prev_ppe))
+        Flow.map ~name:"Depreciation"
+          (fun ppe -> -.(ppe *. depreciation_rate /. 12.0))
+          (Balance.to_flow prev_ppe)
       in
       let ppe_change = Flow.named "PPE Change" (Flow.add (Flow.neg capex) depreciation) in
       let ppe_net = Balance.roll_forward ~name:"PPE Net" ~init:initial_ppe ppe_change in
@@ -149,6 +148,6 @@ let () =
   (* Dependency graph *)
   let oc = open_out "model.dot" in
   let dot_ppf = Format.formatter_of_out_channel oc in
-  Formula.Deps.pp_dot dot_ppf [ Balance.formula balance_check ];
+  Formula.Deps.pp_dot dot_ppf [ Balance.unsafe_to_formula balance_check ];
   Format.pp_print_flush dot_ppf ();
   close_out oc

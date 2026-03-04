@@ -57,16 +57,31 @@ val group : ?total:'a -> string -> 'a item list -> 'a item
     children's data. Supply an explicit [total] to override this with a custom calculation. *)
 
 val flow_line : string -> 'c Flow.t -> 'c Formula.t item
-(** [flow_line label f] is [line label (Flow.formula f)]. Convenience for adding a flow to a
-    statement without manually extracting the formula.
+(** [flow_line label f] is [line label (Flow.unsafe_to_formula f)]. Convenience for adding a flow
+    to a statement without manually extracting the formula.
 
     {b Note.} The flow/balance distinction is erased: the statement tree holds {!Formula.t} values.
     This means {!auto_total} sums all children uniformly. Mixing flows and balances in the same
     group is permitted but the total loses semantic meaning. *)
 
 val balance_line : string -> 'c Balance.t -> 'c Formula.t item
-(** [balance_line label b] is [line label (Balance.formula b)]. Convenience for adding a balance to
-    a statement without manually extracting the formula.
+(** [balance_line label b] is [line label (Balance.unsafe_to_formula b)]. Convenience for adding a
+    balance to a statement without manually extracting the formula.
+
+    See the note on {!flow_line} about flow/balance erasure. *)
+
+val flow_group : ?total:'c Flow.t -> string -> 'c Formula.t item list -> 'c Formula.t item
+(** [flow_group ?total label items] is
+    [group ?total:(Option.map Flow.unsafe_to_formula total) label items]. Convenience for adding a
+    group with a flow total without manually extracting the formula.
+
+    See the note on {!flow_line} about flow/balance erasure. *)
+
+val balance_group :
+  ?total:'c Balance.t -> string -> 'c Formula.t item list -> 'c Formula.t item
+(** [balance_group ?total label items] is
+    [group ?total:(Option.map Balance.unsafe_to_formula total) label items]. Convenience for adding
+    a group with a balance total without manually extracting the formula.
 
     See the note on {!flow_line} about flow/balance erasure. *)
 

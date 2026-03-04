@@ -10,9 +10,10 @@
     - [Formula.feedback] for the revenue/OpEx circular dependency (CAM recoveries depend on
       prior-period OpEx, which includes management fees that depend on current-period EGI).
     - [Flow.growth_simple] for calendar-aware annual growth.
-    - [Flow.year_frac] and [Formula.mul] for interest calculations.
+    - [Flow.year_frac] and [Flow.mul] for interest calculations.
     - [Balance.roll_forward] for the running loan balance.
-    - [Statement.flow_line] and [Statement.group] with explicit [~total] for hierarchical output. *)
+    - [Statement.flow_line] and [Statement.flow_group] with explicit [~total] for hierarchical
+      output. *)
 
 open Orcaset2
 
@@ -105,16 +106,15 @@ let security =
 (* CAM recoveries depend on prior-period OpEx, but OpEx includes management
    (% of EGI), and EGI includes CAM. [Formula.feedback] breaks the cycle: the
    function receives the prior period's opex_total and returns the current
-   definition. We work with [Flow.t] inside and extract [Flow.formula] at
-   the return boundary. *)
+   definition. The boundary uses [Flow.unsafe_of_formula]/[Flow.unsafe_to_formula] to cross
+   between Formula.feedback's raw formula and the typed Flow world. *)
 let cam_recoveries, gross_potential_rent, vacancy_loss, egi, property_management, opex_total =
   Formula.feedback ~default:0.0 (fun prev_opex ->
       let cam_recoveries =
-        Flow.of_formula
-          (Formula.map ~name:"CAM Recoveries"
-             (fun prev ->
-               if prev = 0.0 then cam_estimate_first else Float.abs prev *. cam_recovery_pct)
-             prev_opex)
+        Flow.map ~name:"CAM Recoveries"
+          (fun prev ->
+            if prev = 0.0 then cam_estimate_first else Float.abs prev *. cam_recovery_pct)
+          (Flow.unsafe_of_formula prev_opex)
       in
       let gross_potential_rent =
         Flow.sum ~name:"GPR" [ base_rent; parking; cam_recoveries; other_income ]
@@ -139,7 +139,7 @@ let cam_recoveries, gross_potential_rent, vacancy_loss, egi, property_management
             security;
           ]
       in
-      ( Flow.formula opex_total,
+      ( Flow.unsafe_to_formula opex_total,
         (cam_recoveries, gross_potential_rent, vacancy_loss, egi, property_management, opex_total)
       ))
 
@@ -177,10 +177,9 @@ let year_fracs = Flow.year_frac ~name:"Year Fracs" Daycount.actual_360
 let _debt_balance, (debt_interest, debt_principal) =
   Balance.feedback ~name:"Loan Balance" ~default:loan_amount (fun prev_bal ->
       let interest =
-        Flow.of_formula
-          (Formula.named "Interest Expense"
-             (Formula.scale (-.interest_rate)
-                (Formula.mul (Balance.formula prev_bal) (Flow.formula year_fracs))))
+        Flow.named "Interest Expense"
+          (Flow.scale (-.interest_rate)
+             (Flow.mul (Balance.to_flow prev_bal) year_fracs))
       in
       let principal = Flow.named "Principal" (Flow.sub debt_total_pmt interest) in
       let balance = Balance.roll_forward ~init:loan_amount principal in
@@ -202,7 +201,7 @@ let pro_forma_statement =
   let open Statement in
   group "Real Estate Pro Forma"
     [
-      group ~total:(Flow.formula gross_potential_rent) "Gross Potential Rent"
+      flow_group ~total:gross_potential_rent "Gross Potential Rent"
         [
           flow_line "Base Rent" base_rent;
           flow_line "Parking Income" parking;
@@ -211,7 +210,7 @@ let pro_forma_statement =
         ];
       flow_line "Less: Vacancy & Credit Loss" vacancy_loss;
       flow_line "Effective Gross Income" egi;
-      group ~total:(Flow.formula opex_total) "Operating Expenses"
+      flow_group ~total:opex_total "Operating Expenses"
         [
           flow_line "Property Taxes" property_taxes;
           flow_line "Insurance" insurance;
@@ -223,14 +222,14 @@ let pro_forma_statement =
           flow_line "Security" security;
         ];
       flow_line "Net Operating Income (NOI)" noi;
-      group ~total:(Flow.formula capex_total) "Capital Expenditures"
+      flow_group ~total:capex_total "Capital Expenditures"
         [
           flow_line "Capital Reserves" capital_reserves;
           flow_line "Tenant Improvements" tenant_improvements;
           flow_line "Leasing Commissions" leasing_commissions;
         ];
       flow_line "Cash Flow Before Financing" cfbf;
-      group ~total:(Flow.formula debt_service) "Debt Service"
+      flow_group ~total:debt_service "Debt Service"
         [ flow_line "Interest Expense" debt_interest; flow_line "Principal Payment" debt_principal ];
       flow_line "Cash Flow After Financing" cfaf;
     ]
@@ -277,6 +276,6 @@ let () =
   (* Dependency graph *)
   let oc = open_out "model.dot" in
   let ppf = Format.formatter_of_out_channel oc in
-  Formula.Deps.pp_dot ppf [ Flow.formula cfaf ];
+  Formula.Deps.pp_dot ppf [ Flow.unsafe_to_formula cfaf ];
   Format.pp_print_flush ppf ();
   close_out oc

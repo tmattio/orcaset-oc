@@ -16,7 +16,7 @@
     Group totals are synthesized automatically by [Statement.auto_total] (called implicitly by
     [Statement.eval]) -- no explicit totals needed.
 
-    Demonstrates: [Flow.t] for all line items, [Formula.init] and [Formula.scan] via escape hatch,
+    Demonstrates: [Flow.t] for all line items, [Flow.init] and [Flow.scan],
     [Flow.scale], [Statement.flow_line], [Statement.group] (auto_total), [Statement.eval],
     [Statement.pp], [Statement.lines]. *)
 
@@ -46,9 +46,8 @@ let recurring_revenue =
   Flow.growth_simple ~name:"Recurring Revenue" ~start_date ~rate:recurring_growth recurring_first
 
 (* Non-recurring revenue: random walk with drift and volatility.
-   Formula.scan accumulates over a shock series -- each period's value
-   depends on the previous period's output, drift, and a random shock.
-   We use Formula-level operations and wrap back into Flow. *)
+   Flow.scan accumulates over a shock series -- each period's value
+   depends on the previous period's output, drift, and a random shock. *)
 let rng = Random.State.make [| seed |]
 
 (* Approximate normal shocks via sum of 12 uniforms (central limit theorem). *)
@@ -61,10 +60,9 @@ let shocks =
 
 (* scan ~init feeds the previous output back as ~acc, building a running walk. *)
 let non_recurring_revenue =
-  Flow.of_formula
-    (Formula.scan ~name:"Non-Recurring Revenue" ~init:non_recurring_first
-       (fun ~acc ~x -> acc +. non_recurring_drift +. x)
-       (Flow.formula shocks))
+  Flow.scan ~name:"Non-Recurring Revenue" ~init:non_recurring_first
+    (fun ~acc ~x -> acc +. non_recurring_drift +. x)
+    shocks
 
 (* Cost of Revenue *)
 
@@ -144,11 +142,11 @@ let () =
   let dot_ppf = Format.formatter_of_out_channel oc in
   Formula.Deps.pp_dot dot_ppf
     [
-      Flow.formula recurring_revenue;
-      Flow.formula non_recurring_revenue;
-      Flow.formula recurring_cost;
-      Flow.formula non_recurring_cost;
-      Flow.formula admin;
+      Flow.unsafe_to_formula recurring_revenue;
+      Flow.unsafe_to_formula non_recurring_revenue;
+      Flow.unsafe_to_formula recurring_cost;
+      Flow.unsafe_to_formula non_recurring_cost;
+      Flow.unsafe_to_formula admin;
     ];
   Format.pp_print_flush dot_ppf ();
   close_out oc

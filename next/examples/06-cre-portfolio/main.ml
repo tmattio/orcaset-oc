@@ -10,7 +10,7 @@
     [Statement.group], [Statement.line], and [Statement.pp] work with pre-evaluated arrays.
 
     Internally, [build_property] uses [Flow.t] and [Balance.t] for typed construction, then extracts
-    the underlying [Formula.t] via [Flow.formula] and [Balance.formula] for uniform evaluation.
+    the underlying [Formula.t] via escape hatches for uniform evaluation.
 
     Demonstrates: Flow.t, Balance.t, Balance.feedback, Formula.eval_many, Statement.line,
     Statement.group, Statement.layout, Statement.pp, Domain.spawn, parallel aggregation. *)
@@ -109,20 +109,16 @@ let build_property (a : assumptions) =
   let cam_recoveries, gpr, vacancy_loss, egi, management, opex_total =
     Formula.feedback ~default:0.0 (fun prev_opex ->
         let cam_recoveries =
-          Flow.of_formula
-            (Formula.map ~name:"CAM Recoveries"
-               (fun prev ->
-                 if prev = 0.0 then a.cam_estimate_first else Float.abs prev *. a.cam_recovery_pct)
-               prev_opex)
+          Flow.map ~name:"CAM Recoveries"
+            (fun prev ->
+              if prev = 0.0 then a.cam_estimate_first else Float.abs prev *. a.cam_recovery_pct)
+            (Flow.unsafe_of_formula prev_opex)
         in
         let gpr = Flow.sum ~name:"GPR" [ base_rent; parking; cam_recoveries; other_income ] in
         let vacancy_loss = Flow.named "Vacancy Loss" (Flow.scale (-.a.vacancy_rate) gpr) in
         let egi = Flow.named "EGI" (Flow.add gpr vacancy_loss) in
         let management =
-          Flow.of_formula
-            (Formula.map ~name:"Management"
-               (fun e -> -.e *. a.management_fee_pct)
-               (Flow.formula egi))
+          Flow.map ~name:"Management" (fun e -> -.e *. a.management_fee_pct) egi
         in
         let opex_total =
           Flow.sum ~name:"Total OpEx"
@@ -137,7 +133,7 @@ let build_property (a : assumptions) =
               security;
             ]
         in
-        (Flow.formula opex_total,
+        (Flow.unsafe_to_formula opex_total,
          (cam_recoveries, gpr, vacancy_loss, egi, management, opex_total)))
   in
 
@@ -146,17 +142,13 @@ let build_property (a : assumptions) =
 
   (* CapEx *)
   let capital_reserves =
-    Flow.of_formula
-      (Formula.map ~name:"Capital Reserves" (fun e -> -.e *. a.reserve_pct) (Flow.formula egi))
+    Flow.map ~name:"Capital Reserves" (fun e -> -.e *. a.reserve_pct) egi
   in
   let ti =
     Flow.const ~name:"Tenant Improvements" (-.(a.ti_per_sf_annual *. a.building_sf /. 12.0))
   in
   let leasing_commissions =
-    Flow.of_formula
-      (Formula.map ~name:"Leasing Commissions"
-         (fun e -> -.e *. a.leasing_commission_pct)
-         (Flow.formula egi))
+    Flow.map ~name:"Leasing Commissions" (fun e -> -.e *. a.leasing_commission_pct) egi
   in
   let capex_total = Flow.sum ~name:"Total CapEx" [ capital_reserves; ti; leasing_commissions ] in
 
@@ -174,11 +166,9 @@ let build_property (a : assumptions) =
   let _balance, (interest, principal) =
     Balance.feedback ~name:"Loan Balance" ~default:loan_amount (fun prev_bal ->
         let interest =
-          Flow.of_formula
-            (Formula.named "Interest"
-               (Formula.map2
-                  (fun bal yf -> -.bal *. a.interest_rate *. yf)
-                  (Balance.formula prev_bal) (Flow.formula year_fracs)))
+          Flow.map2 ~name:"Interest"
+            (fun bal yf -> -.bal *. a.interest_rate *. yf)
+            (Balance.to_flow prev_bal) year_fracs
         in
         let principal = Flow.named "Principal" (Flow.sub total_pmt interest) in
         let balance = Balance.roll_forward ~init:loan_amount principal in
@@ -190,7 +180,7 @@ let build_property (a : assumptions) =
   let cfaf = Flow.named "CFAF" (Flow.add cfbf debt_service) in
 
   (* Extract Formula.t for uniform eval_many *)
-  let f = Flow.formula in
+  let f = Flow.unsafe_to_formula in
   [
     ("Base Rent", f base_rent);
     ("Parking Income", f parking);

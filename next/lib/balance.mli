@@ -26,6 +26,16 @@ val const : ?name:string -> float -> 'c t
 val init : ?name:string -> (Period.t -> float) -> 'c t
 (** [init f] is a balance that produces [f period] at each period. *)
 
+val of_dates : ?name:string -> (Date.t * float) list -> 'c t
+(** [of_dates observations] distributes date-keyed observations into
+    periods using last-observation-wins semantics: each period takes
+    the value of the most recent observation whose date falls on or
+    before the period's end date. Periods before any observation
+    produce [0.0].
+
+    Raises [Invalid_argument] if any observation date falls outside
+    the timeline. *)
+
 (** {1:bridge Bridge from Flow} *)
 
 val roll_forward : ?name:string -> init:float -> 'c Flow.t -> 'c t
@@ -69,6 +79,9 @@ val map2 :
 (** [map2 f a b] applies [f] to values of [a] and [b] at each
     period. *)
 
+val mul : 'c t -> 'c t -> 'c t
+(** [mul a b] is the pointwise product of [a] and [b]. *)
+
 (** {1:cross_period Cross-period} *)
 
 val prev : ?name:string -> 'c t -> default:float -> 'c t
@@ -85,6 +98,17 @@ val at_period_end : 'c t -> 'c t
     represents the end-of-period value. *)
 
 (** {1:to_flow Bridge to Flow} *)
+
+val to_flow : ?name:string -> 'c t -> 'c Flow.t
+(** [to_flow b] reads the balance value at each period as a flow.
+    This is the primary cross-type bridge: it lets balance values
+    participate in flow arithmetic without escape hatches.
+
+    {b Note.} The resulting flow carries the end-of-period balance
+    value in each period slot. It does {b not} have interval-quantity
+    semantics, so {!Flow.Materialized.accrue} on the result is
+    not meaningful. Use it for per-period calculations (e.g.
+    [Flow.mul (Balance.to_flow bal) year_frac]). *)
 
 val change : 'c t -> default:float -> 'c Flow.t
 (** [change b ~default] is the per-period change in [b], as a flow.
@@ -110,10 +134,8 @@ val feedback :
       let balance, (interest, principal) =
         Balance.feedback ~default:loan_amount (fun prev_bal ->
             let interest =
-              Flow.of_formula
-                (Formula.scale (-.rate)
-                   (Formula.mul (Balance.formula prev_bal)
-                      (Flow.formula year_fracs)))
+              Flow.scale (-.rate)
+                (Flow.mul (Balance.to_flow prev_bal) year_fracs)
             in
             let principal = Flow.sub total_pmt interest in
             let bal =
@@ -142,18 +164,29 @@ val fixpoint :
     Raises [Formula.Convergence_error] if [max_iter] iterations
     are exhausted. *)
 
-(** {1:escape Escape hatches} *)
+(** {1:convert Currency conversion} *)
 
-val formula : 'c t -> 'c Formula.t
-(** [formula b] is the underlying {!Formula.t}. *)
+val convert : rate:float -> 'c1 t -> 'c2 t
+(** [convert ~rate b] scales [b] by [rate] and changes the
+    currency tag. *)
 
-val of_formula : 'c Formula.t -> 'c t
-(** [of_formula s] wraps [s] as a balance. The caller asserts
-    that [s] has balance semantics (point-in-time quantities). *)
+(** {1:unsafe Unsafe escape hatches}
 
-val of_array : ?name:string -> float array -> 'c t
-(** [of_array arr] is a balance that produces [arr.(i)] at
-    period [i]. Periods beyond [Array.length arr] produce [0.0].
+    These operations drop to the untyped {!Formula.t} layer.
+    Prefer the safe API above for new code. *)
+
+val unsafe_to_formula : 'c t -> 'c Formula.t
+(** [unsafe_to_formula b] is the underlying {!Formula.t}. *)
+
+val unsafe_of_formula : 'c Formula.t -> 'c t
+(** [unsafe_of_formula s] wraps [s] as a balance. The caller
+    asserts that [s] has balance semantics (point-in-time
+    quantities). *)
+
+val unsafe_of_array : ?name:string -> float array -> 'c t
+(** [unsafe_of_array arr] is a balance that produces [arr.(i)]
+    at period [i]. Periods beyond [Array.length arr] produce
+    [0.0].
 
     Prefer {!init} or {!roll_forward} for new code. *)
 

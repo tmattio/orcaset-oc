@@ -757,7 +757,7 @@ let test_schedule () =
 let test_flow () =
   let evf msg tl f exp = fla msg exp (Flow.eval_values tl f) in
   evf "const" tl3 (Flow.const 42.0) [| 42.0; 42.0; 42.0 |];
-  evf "of_array" tl3 (Flow.of_array [| 1.0; 2.0 |]) [| 1.0; 2.0; 0.0 |];
+  evf "of_array" tl3 (Flow.unsafe_of_array [| 1.0; 2.0 |]) [| 1.0; 2.0; 0.0 |];
   evf "init" tl3
     (Flow.init (fun p -> Period.days p |> float_of_int))
     [| 31.0; 28.0; 31.0 |];
@@ -765,15 +765,15 @@ let test_flow () =
     (Flow.of_events [ (date 2025 1 10, 100.0); (date 2025 3 5, 200.0) ])
     [| 100.0; 0.0; 200.0 |];
   (* exact algebra *)
-  let a = Flow.of_array [| 10.0; 20.0; 30.0 |] in
-  let b = Flow.of_array [| 1.0; 2.0; 3.0 |] in
+  let a = Flow.unsafe_of_array [| 10.0; 20.0; 30.0 |] in
+  let b = Flow.unsafe_of_array [| 1.0; 2.0; 3.0 |] in
   evf "add" tl3 (Flow.add a b) [| 11.0; 22.0; 33.0 |];
   evf "sub" tl3 (Flow.sub a b) [| 9.0; 18.0; 27.0 |];
   evf "scale" tl3 (Flow.scale 2.0 a) [| 20.0; 40.0; 60.0 |];
   evf "neg" tl3 (Flow.neg a) [| -10.0; -20.0; -30.0 |];
   evf "sum" tl3 (Flow.sum [ a; b; Flow.const 100.0 ]) [| 111.0; 122.0; 133.0 |];
   (* escape hatch roundtrip *)
-  let f = Flow.of_formula (Flow.formula a) in
+  let f = Flow.unsafe_of_formula (Flow.unsafe_to_formula a) in
   evf "roundtrip" tl3 f [| 10.0; 20.0; 30.0 |];
   (* named *)
   let _ = Flow.named "Revenue" a in
@@ -841,9 +841,9 @@ let test_flow () =
 let test_balance () =
   let evb msg tl b exp = fla msg exp (Balance.eval_values tl b) in
   evb "const" tl3 (Balance.const 100.0) [| 100.0; 100.0; 100.0 |];
-  evb "of_array" tl3 (Balance.of_array [| 10.0; 20.0 |]) [| 10.0; 20.0; 0.0 |];
+  evb "of_array" tl3 (Balance.unsafe_of_array [| 10.0; 20.0 |]) [| 10.0; 20.0; 0.0 |];
   (* roll_forward: running sum *)
-  let flow = Flow.of_array [| 100.0; 200.0; 300.0 |] in
+  let flow = Flow.unsafe_of_array [| 100.0; 200.0; 300.0 |] in
   evb "roll_forward" tl3
     (Balance.roll_forward ~init:1000.0 flow)
     [| 1100.0; 1300.0; 1600.0 |];
@@ -852,8 +852,8 @@ let test_balance () =
     (Balance.roll_forward_with ~init:1.0 (fun ~acc ~x -> acc *. x) flow)
     [| 100.0; 20000.0; 6000000.0 |];
   (* algebra *)
-  let a = Balance.of_array [| 10.0; 20.0; 30.0 |] in
-  let b = Balance.of_array [| 1.0; 2.0; 3.0 |] in
+  let a = Balance.unsafe_of_array [| 10.0; 20.0; 30.0 |] in
+  let b = Balance.unsafe_of_array [| 1.0; 2.0; 3.0 |] in
   evb "add" tl3 (Balance.add a b) [| 11.0; 22.0; 33.0 |];
   evb "sub" tl3 (Balance.sub a b) [| 9.0; 18.0; 27.0 |];
   evb "scale" tl3 (Balance.scale 2.0 a) [| 20.0; 40.0; 60.0 |];
@@ -864,7 +864,7 @@ let test_balance () =
   evb "at_period_start" tl3 (Balance.at_period_start a ~default:0.0) [| 0.0; 10.0; 20.0 |];
   evb "at_period_end" tl3 (Balance.at_period_end a) [| 10.0; 20.0; 30.0 |];
   (* escape hatch roundtrip *)
-  let rt = Balance.of_formula (Balance.formula a) in
+  let rt = Balance.unsafe_of_formula (Balance.unsafe_to_formula a) in
   evb "roundtrip" tl3 rt [| 10.0; 20.0; 30.0 |];
   (* eval returns Materialized *)
   let m = Balance.eval tl3 a in
@@ -888,7 +888,7 @@ let test_balance () =
   invalid "Balance.Materialized.make: array length does not match timeline length"
     (fun () -> ignore (Balance.Materialized.make tl3 [| 1.0; 2.0 |]));
   (* at: Linear interpolation *)
-  let flow = Flow.of_array [| 100.0; 200.0; 300.0 |] in
+  let flow = Flow.unsafe_of_array [| 100.0; 200.0; 300.0 |] in
   let bal = Balance.roll_forward ~init:1000.0 flow in
   let bal_m, flow_m = Balance.eval_with_flow tl3 bal ~flow in
   fl "at jan1" 1000.0
@@ -908,20 +908,34 @@ let test_balance () =
   fl "ewf bal 2" 1600.0 (Balance.Materialized.get bal_m 2);
   fl "ewf flow 2" 300.0 (Flow.Materialized.get flow_m 2);
   (* change: balance -> flow *)
-  let bal = Balance.of_array [| 100.0; 150.0; 120.0 |] in
+  let bal = Balance.unsafe_of_array [| 100.0; 150.0; 120.0 |] in
   let chg = Balance.change bal ~default:0.0 in
   fla "change" [| 100.0; 50.0; -30.0 |] (Flow.eval_values tl3 chg);
   (* roundtrip: roll_forward (change b) ~ b when default = init *)
-  let flow2 = Flow.of_array [| 10.0; 20.0; 30.0 |] in
+  let flow2 = Flow.unsafe_of_array [| 10.0; 20.0; 30.0 |] in
   let bal2 = Balance.roll_forward ~init:0.0 flow2 in
   let chg2 = Balance.change bal2 ~default:0.0 in
   fla "roundtrip change" [| 10.0; 20.0; 30.0 |] (Flow.eval_values tl3 chg2);
+  (* of_dates: last-observation-wins *)
+  evb "of_dates" tl3
+    (Balance.of_dates [ (date 2025 1 15, 100.0); (date 2025 2 10, 200.0) ])
+    [| 100.0; 200.0; 200.0 |];
+  (* of_dates: multiple observations in same period, last wins *)
+  evb "of_dates last wins" tl3
+    (Balance.of_dates [ (date 2025 1 10, 100.0); (date 2025 1 20, 150.0) ])
+    [| 150.0; 150.0; 150.0 |];
+  (* of_dates: periods before any observation produce 0.0 *)
+  evb "of_dates forward fill" tl3
+    (Balance.of_dates [ (date 2025 2 15, 500.0) ])
+    [| 0.0; 500.0; 500.0 |];
+  (* of_dates: out-of-range raises *)
+  invalid "Balance.of_dates: observation date 2024-01-01 is outside the timeline"
+    (fun () -> ignore (Balance.eval_values tl3
+      (Balance.of_dates [ (date 2024 1 1, 100.0) ])));
   (* feedback: interest accrual on previous balance *)
   let balance2, interest =
     Balance.feedback ~default:100.0 (fun prev_bal ->
-        let interest =
-          Flow.of_formula (Formula.map (fun b -> b *. 0.01) (Balance.formula prev_bal))
-        in
+        let interest = Flow.map (fun b -> b *. 0.01) (Balance.to_flow prev_bal) in
         let balance = Balance.roll_forward ~init:100.0 interest in
         (balance, (balance, interest)))
   in
@@ -932,7 +946,7 @@ let test_balance () =
   fl "fb int[1]" 1.01 vi.(1);
   (* fixpoint: LTC construction loan pattern *)
   let ltc = 0.8 and rate = 0.05 in
-  let base_cost = Balance.of_array [| 1000.0; 2000.0; 3000.0 |] in
+  let base_cost = Balance.unsafe_of_array [| 1000.0; 2000.0; 3000.0 |] in
   let loan =
     Balance.fixpoint ~guess:0.0 (fun commitment ->
         Balance.map2 (fun bc c -> ltc *. (bc +. rate *. c))

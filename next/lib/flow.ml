@@ -39,11 +39,26 @@ let scale k (F s) = F (Formula.scale k s)
 let neg (F s) = F (Formula.neg s)
 let sum ?name fs = F (Formula.sum ?name (List.map (fun (F s) -> s) fs))
 
-(* Escape hatches *)
+(* Pointwise combinators *)
 
-let formula (F s) = s
-let of_formula s = F s
-let of_array ?name arr = F (Formula.of_array ?name arr)
+let map ?name f (F s) = F (Formula.map ?name f s)
+let map2 ?name f (F a) (F b) = F (Formula.map2 ?name f a b)
+let mul (F a) (F b) = F (Formula.mul a b)
+
+(* Cross-period *)
+
+let prev ?name (F src) ~default = F (Formula.prev ?name src ~default)
+let scan ?name ~init f (F flow) = F (Formula.scan ?name ~init f flow)
+
+(* Currency conversion *)
+
+let convert ~rate (F s) = F (Formula.convert ~rate s)
+
+(* Unsafe escape hatches *)
+
+let unsafe_to_formula (F s) = s
+let unsafe_of_formula s = F s
+let unsafe_of_array ?name arr = F (Formula.of_array ?name arr)
 
 (* Materialized *)
 

@@ -54,10 +54,9 @@ let year_fracs = Flow.year_frac ~name:"Year Fracs" Daycount.thirty_360_us
 let balance, (interest_pmt, principal_pmt) =
   Balance.feedback ~name:"Balance" ~default:loan_amount (fun prev_bal ->
       let interest =
-        Flow.of_formula
-          (Formula.named "Interest"
-             (Formula.scale (-.annual_rate)
-                (Formula.mul (Balance.formula prev_bal) (Flow.formula year_fracs))))
+        Flow.named "Interest"
+          (Flow.scale (-.annual_rate)
+             (Flow.mul (Balance.to_flow prev_bal) year_fracs))
       in
       let principal = Flow.named "Principal" (Flow.sub total_pmt interest) in
       let balance = Balance.roll_forward ~init:loan_amount principal in
@@ -123,6 +122,6 @@ let () =
   let oc = open_out "model.dot" in
   let ppf = Format.formatter_of_out_channel oc in
   Formula.Deps.pp_dot ppf
-    [ Balance.formula balance; Flow.formula interest_pmt; Flow.formula principal_pmt ];
+    [ Balance.unsafe_to_formula balance; Flow.unsafe_to_formula interest_pmt; Flow.unsafe_to_formula principal_pmt ];
   Format.pp_print_flush ppf ();
   close_out oc
