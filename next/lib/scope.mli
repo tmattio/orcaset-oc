@@ -42,7 +42,10 @@ val define : t -> 'a Key.t -> 'a -> unit
     Raises [Invalid_argument] if [scope] is sealed or [key] is already defined in this scope. *)
 
 val seal : t -> unit
-(** [seal scope] freezes [scope]. Subsequent calls to {!define} raise. *)
+(** [seal scope] freezes [scope]. Subsequent calls to {!define} raise.
+
+    Raises [Invalid_argument] if any imported scope is not sealed.
+    Raises [Invalid_argument] if any key is ambiguous across the import graph. *)
 
 (** {1:lookup Lookup} *)
 
