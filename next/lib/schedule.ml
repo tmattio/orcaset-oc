@@ -26,26 +26,38 @@ let gen_date (offset : Period.offset) roll anchor k =
   let d = if offset.month_end then snap_eom d else d in
   apply_roll roll d
 
+(* Returns (dates, has_stub) where has_stub is true when the first period
+   does not align with the natural grid (start_date differs from the
+   generated grid point). *)
 let gen_backward offset roll ~start_date ~end_date =
   let rec collect k acc =
     let d = gen_date offset roll end_date (-k) in
-    if Date.(d <= start_date) then start_date :: acc else collect (k + 1) (d :: acc)
+    if Date.(d <= start_date) then (start_date :: acc, Date.(d < start_date))
+    else collect (k + 1) (d :: acc)
   in
   collect 1 [ end_date ]
 
+(* Returns (dates, has_stub) where has_stub is true when the last period
+   does not align with the natural grid. *)
 let gen_forward offset roll ~start_date ~end_date =
   let rec collect k acc =
     let d = gen_date offset roll start_date k in
-    if Date.(d >= end_date) then List.rev (end_date :: acc) else collect (k + 1) (d :: acc)
+    if Date.(d >= end_date) then (List.rev (end_date :: acc), Date.(d > end_date))
+    else collect (k + 1) (d :: acc)
   in
   collect 1 [ start_date ]
 
-let merge_first = function a :: _ :: rest -> a :: rest | dates -> dates
+let merge_first = function
+  | a :: _ :: rest when rest <> [] -> a :: rest
+  | dates -> dates
 
-let rec merge_last = function
-  | ([] | [ _ ]) as l -> l
-  | [ a; _; c ] -> [ a; c ]
-  | x :: rest -> x :: merge_last rest
+let merge_last dates =
+  let arr = Array.of_list dates in
+  let n = Array.length arr in
+  if n < 3 then dates
+  else
+    Array.to_list (Array.init (n - 1) (fun i ->
+        if i < n - 2 then arr.(i) else arr.(n - 1)))
 
 (* Construction *)
 
@@ -53,16 +65,16 @@ let make ~start_date ~end_date ~offset ?(roll = Same_day) ?(stub = Short_first)
     ?(bdc = Calendar.Unadjusted) ?(calendar = Calendar.weekdays) () =
   if Date.(end_date <= start_date) then
     invalid_arg "Schedule.make: end_date must be after start_date";
-  let gen =
+  let dates, has_stub =
     match stub with
     | Short_first | Long_first -> gen_backward offset roll ~start_date ~end_date
     | Short_last | Long_last -> gen_forward offset roll ~start_date ~end_date
   in
   let unadjusted_list =
     match stub with
-    | Short_first | Short_last -> gen
-    | Long_first -> merge_first gen
-    | Long_last -> merge_last gen
+    | Short_first | Short_last -> dates
+    | Long_first -> if has_stub then merge_first dates else dates
+    | Long_last -> if has_stub then merge_last dates else dates
   in
   let unadjusted = Array.of_list unadjusted_list in
   let n = Array.length unadjusted in

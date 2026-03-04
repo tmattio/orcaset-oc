@@ -605,6 +605,26 @@ let test_schedule () =
   let d = Schedule.dates s in
   ds "ll d0" "2025-01-01" d.(0);
   ds "ll d1" "2025-05-15" d.(1);
+  (* Stub: Long_first with even division — no stub exists, should NOT merge *)
+  let s =
+    Schedule.make ~start_date:(date 2025 1 1) ~end_date:(date 2025 7 1) ~offset:qoffset
+      ~stub:Long_first ()
+  in
+  check int "lf even len" 2 (Schedule.length s);
+  let d = Schedule.dates s in
+  ds "lf even d0" "2025-01-01" d.(0);
+  ds "lf even d1" "2025-04-01" d.(1);
+  ds "lf even d2" "2025-07-01" d.(2);
+  (* Stub: Long_last with even division — no stub exists, should NOT merge *)
+  let s =
+    Schedule.make ~start_date:(date 2025 1 1) ~end_date:(date 2025 7 1) ~offset:qoffset
+      ~stub:Long_last ()
+  in
+  check int "ll even len" 2 (Schedule.length s);
+  let d = Schedule.dates s in
+  ds "ll even d0" "2025-01-01" d.(0);
+  ds "ll even d1" "2025-04-01" d.(1);
+  ds "ll even d2" "2025-07-01" d.(2);
   (* Business day adjustment: interior dates adjusted, endpoints fixed *)
   let s =
     Schedule.make ~start_date:(date 2025 1 1) ~end_date:(date 2026 1 1) ~offset:qoffset
