@@ -60,7 +60,7 @@ let rec auto_total item =
         | None -> (
             match List.filter_map direct_data items with
             | [] -> None
-            | child_series -> Some (Series.sum ~name:("Total " ^ label) child_series))
+            | child_series -> Some (Formula.sum ~name:("Total " ^ label) child_series))
       in
       Group { label; items; total }
 
@@ -74,7 +74,7 @@ let rec collect_series item =
       match total with Some s -> s :: child_series | None -> child_series)
 
 (* Two-pass evaluation strategy:
-   1. Collect every Series.t from the tree into a flat list
+   1. Collect every Formula.t from the tree into a flat list
    2. Evaluate them all at once via eval_many (shared memoization context)
    3. Map results back into the tree using physical equality (List.assq)
    This avoids evaluating shared sub-series multiple times and ensures
@@ -82,18 +82,18 @@ let rec collect_series item =
 let eval tl item =
   let item = auto_total item in
   let all_series = collect_series item in
-  let results = Series.eval_many tl all_series in
+  let results = Formula.eval_many tl all_series in
   let pairs = List.combine all_series results in
   map (fun s -> List.assq s pairs) item
 
 let eval_materialized tl item =
   let item = auto_total item in
   let all_series = collect_series item in
-  let results = Series.eval_many tl all_series in
+  let results = Formula.eval_many tl all_series in
   let pairs = List.combine all_series results in
   map (fun s ->
     let vs = List.assq s pairs in
-    Series.Materialized.make tl vs
+    Formula.Materialized.make tl vs
   ) item
 
 (* Pretty-printing *)

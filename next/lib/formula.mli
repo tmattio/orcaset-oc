@@ -11,9 +11,9 @@
 
     {1:model Computation model}
 
-    A series holds no data. It is a node in a DAG that is evaluated against a concrete
+    A formula holds no data. It is a node in a DAG that is evaluated against a concrete
     {!Timeline.t}. Evaluation proceeds left to right (period 0, 1, {e ...}, n-1) and every
-    {e (series, period)} cell is computed at most once.
+    {e (formula, period)} cell is computed at most once.
 
     {!prev} and {!scan} are the only combinators that introduce cross-period dependencies; all
     others are pointwise within a single period. Same-period cycles are detected at evaluation time
@@ -22,7 +22,7 @@
 
     {1:currency Currency safety}
 
-    The type parameter ['c] is a phantom tag representing the currency or unit of the series.
+    The type parameter ['c] is a phantom tag representing the currency or unit of the formula.
     Combinators like {!add} and {!sub} require both operands to share the same tag, preventing
     accidental mixing of currencies at compile time. Constructors return a universally quantified
     ['c t], so single-currency models need no annotations. For multi-currency models, annotate entry
@@ -32,37 +32,37 @@
       type usd
       type eur
 
-      let eur_revenue : eur Series.t = Series.growth_simple ~start_date ~rate:0.05 8000.0
-      let usd_revenue : usd Series.t = Series.convert ~rate:1.08 eur_revenue
+      let eur_revenue : eur Formula.t = Formula.growth_simple ~start_date ~rate:0.05 8000.0
+      let usd_revenue : usd Formula.t = Formula.convert ~rate:1.08 eur_revenue
     ]}
 
-    {b Thread safety.} Series values are pure DAG descriptions, but evaluation mutates internal
+    {b Thread safety.} Formula values are pure DAG descriptions, but evaluation mutates internal
     caches ({!type-t} values with {!feedback} or {!fixpoint} contain mutable refs). Do not evaluate
-    the same series concurrently from multiple domains.
+    the same formula concurrently from multiple domains.
 
     {1:constructors Constructors} *)
 
 type +'c t
-(** The type for series tagged with currency or unit ['c]. *)
+(** The type for formulas tagged with currency or unit ['c]. *)
 
 val const : ?name:string -> float -> 'c t
-(** [const v] is a series that produces [v] at every period. *)
+(** [const v] is a formula that produces [v] at every period. *)
 
 val of_array : ?name:string -> float array -> 'c t
-(** [of_array arr] is a series that produces [arr.(i)] at period [i]. Periods beyond
+(** [of_array arr] is a formula that produces [arr.(i)] at period [i]. Periods beyond
     [Array.length arr] produce [0.0]. The array is captured by reference and must not be mutated
     after the call. *)
 
 val init_flow : ?name:string -> (Period.t -> float) -> 'c t
-(** [init_flow f] is a series that produces [f period] at each period. This is the preferred
+(** [init_flow f] is a formula that produces [f period] at each period. This is the preferred
     constructor for period-based computations.
 
     {[
-      let days = Series.init_flow (fun p -> Period.days p |> float_of_int)
+      let days = Formula.init_flow (fun p -> Period.days p |> float_of_int)
     ]} *)
 
 val init : ?name:string -> (int -> Period.t -> float) -> 'c t
-(** [init f] is a series that produces [f i period] at period [i]. The function receives both the
+(** [init f] is a formula that produces [f i period] at period [i]. The function receives both the
     zero-based index and the {!Period.t}. Prefer {!init_flow} unless the index is genuinely needed
     (e.g. indexing into an external array). *)
 
@@ -78,15 +78,15 @@ val growth_simple :
   rate:float ->
   float ->
   'c t
-(** [growth_simple ~start_date ~rate initial] is a series that produces
+(** [growth_simple ~start_date ~rate initial] is a formula that produces
     [initial *. (1.0 +. rate *. daycount start_date period_start)] at each period (simple / linear
     growth). [daycount] defaults to {!Daycount.actual_360}.
 
     {[
-      let revenue = Series.growth_simple ~start_date ~rate:0.05 8000.0
+      let revenue = Formula.growth_simple ~start_date ~rate:0.05 8000.0
 
       let rent =
-        Series.growth_simple ~start_date ~rate:0.03 ~daycount:Daycount.calendar_monthly 2000.0
+        Formula.growth_simple ~start_date ~rate:0.03 ~daycount:Daycount.calendar_monthly 2000.0
     ]}
 
     See also {!growth_compound} for compounding growth. *)
@@ -98,14 +98,14 @@ val growth_compound :
   rate:float ->
   float ->
   'c t
-(** [growth_compound ~start_date ~rate initial] is a series that produces
+(** [growth_compound ~start_date ~rate initial] is a formula that produces
     [initial *. (1.0 +. rate) ** (daycount start_date period_start)] at each period (discrete
     compounding). [daycount] defaults to {!Daycount.actual_360}.
 
     Use this when the rate compounds rather than accrues linearly. See also {!growth_simple}. *)
 
 val year_frac : ?name:string -> (Date.t -> Date.t -> float) -> 'c t
-(** [year_frac daycount] is a series that produces [daycount period_start period_end] at each
+(** [year_frac daycount] is a formula that produces [daycount period_start period_end] at each
     period. Useful for computing interest as [balance * rate * year_frac]. *)
 
 val of_events : ?name:string -> (Date.t * float) list -> 'c t
@@ -121,13 +121,13 @@ val of_events : ?name:string -> (Date.t * float) list -> 'c t
 
 val named : string -> 'c t -> 'c t
 (** [named name s] attaches [name] to [s] for use in {!Cycle_error} and {!Convergence_error}
-    diagnostics and as a label in {!Deps.pp_dot}. The returned series shares memoization state with
+    diagnostics and as a label in {!Deps.pp_dot}. The returned formula shares memoization state with
     [s]. *)
 
 (** {1:pointwise Pointwise combinators}
 
     These combinators operate independently within each period. For period [i], only the values at
-    period [i] of the input series are used. *)
+    period [i] of the input formulas are used. *)
 
 val map : ?name:string -> (float -> float) -> 'c t -> 'c t
 (** [map f s] applies [f] to each value of [s]. *)
@@ -171,7 +171,7 @@ val round : int -> 'c t -> 'c t
     currency precision. *)
 
 val sum : ?name:string -> 'c t list -> 'c t
-(** [sum ss] is the pointwise sum of all series in [ss]. The empty list produces [0.0] at every
+(** [sum ss] is the pointwise sum of all formulas in [ss]. The empty list produces [0.0] at every
     period. *)
 
 (** {1:conditional Conditional} *)
@@ -193,7 +193,7 @@ val where : cond:'a t -> then_:'c t -> else_:'c t -> 'c t
 val prev : ?name:string -> 'c t -> default:float -> 'c t
 (** [prev s ~default] produces [default] at period 0 and [s.(i-1)] at period [i > 0]. This is the
     primitive for cross-period dependencies and the mechanism by which {!feedback} breaks
-    same-period cycles in mutually recursive series. *)
+    same-period cycles in mutually recursive formulas. *)
 
 val scan : ?name:string -> init:float -> (acc:float -> x:float -> float) -> 'c t -> 'c t
 (** [scan ~init f flow] produces a running accumulation over [flow]:
@@ -205,7 +205,7 @@ val scan : ?name:string -> init:float -> (acc:float -> x:float -> float) -> 'c t
     into itself.
 
     {[
-      let balance = Series.scan ~init:1000.0 (fun ~acc ~x -> acc +. x) net_flow
+      let balance = Formula.scan ~init:1000.0 (fun ~acc ~x -> acc +. x) net_flow
       (* balance.(0) = 1000 + net_flow.(0)
          balance.(1) = balance.(0) + net_flow.(1)
          ... *)
@@ -216,21 +216,21 @@ val cumsum : ?name:string -> init:float -> 'c t -> 'c t
     starting from [init]. *)
 
 val feedback : ?name:string -> default:float -> ('c t -> 'c t * 'a) -> 'a
-(** [feedback ~default f] ties a self-referential knot. It calls [f] with a series representing the
-    {e previous period's} value of the series that [f] defines ([default] at period 0). [f] returns
-    [(definition, result)] where [definition] is the series fed back and [result] is returned to the
+(** [feedback ~default f] ties a self-referential knot. It calls [f] with a formula representing the
+    {e previous period's} value of the formula that [f] defines ([default] at period 0). [f] returns
+    [(definition, result)] where [definition] is the formula fed back and [result] is returned to the
     caller.
 
-    This is the standard pattern for mutual recursion between series. For example, interest depends
+    This is the standard pattern for mutual recursion between formulas. For example, interest depends
     on the prior balance but the balance depends on principal which depends on interest:
 
     {[
       let balance, interest =
-        Series.feedback ~default:loan_amount (fun prev_balance ->
+        Formula.feedback ~default:loan_amount (fun prev_balance ->
             let interest =
-              Series.map2 (fun bal yf -> -.bal *. rate *. yf) prev_balance year_fracs
+              Formula.map2 (fun bal yf -> -.bal *. rate *. yf) prev_balance year_fracs
             in
-            let balance = Series.cumsum ~init:loan_amount (Series.sub total_pmt interest) in
+            let balance = Formula.cumsum ~init:loan_amount (Formula.sub total_pmt interest) in
             (balance, (balance, interest)))
     ]}
 
@@ -248,10 +248,10 @@ val fixpoint : ?name:string -> ?tol:float -> ?max_iter:int -> guess:float -> ('c
 
     {[
       let loan_commitment =
-        Series.fixpoint ~guess:0.0 (fun commitment ->
-            let interest_reserve = Series.mul (Series.scale rate commitment) year_fracs in
-            let total_costs = Series.add hard_costs interest_reserve in
-            Series.scale ltc_ratio total_costs)
+        Formula.fixpoint ~guess:0.0 (fun commitment ->
+            let interest_reserve = Formula.mul (Formula.scale rate commitment) year_fracs in
+            let total_costs = Formula.add hard_costs interest_reserve in
+            Formula.scale ltc_ratio total_costs)
     ]}
 
     [tol] defaults to [1e-10]. [max_iter] defaults to [100].
@@ -268,22 +268,22 @@ val convert : rate:float -> 'c1 t -> 'c2 t
 
 exception Cycle_error of { series_name : string option; period_index : int }
 (** Raised when evaluation detects a same-period dependency cycle. [series_name] is present when the
-    series was given a name with {!named} or a [?name] parameter. *)
+    formula was given a name with {!named} or a [?name] parameter. *)
 
 exception Convergence_error of { series_name : string option; period_index : int; iterations : int }
 (** Raised when {!fixpoint} does not converge. [iterations] is the number of iterations attempted.
 *)
 
 val eval : Timeline.t -> 'c t -> float array
-(** [eval tl s] materializes [s] against [tl], returning one [float] per period. Each series
+(** [eval tl s] materializes [s] against [tl], returning one [float] per period. Each formula
     evaluates at a given period at most once.
 
     @raise Cycle_error if a same-period cycle is detected.
     @raise Convergence_error if a {!fixpoint} does not converge. *)
 
 val eval_many : Timeline.t -> 'c t list -> float array list
-(** [eval_many tl ss] materializes each series in [ss] against [tl], sharing a single memoization
-    context. Use this when evaluating multiple series that share subexpressions to avoid redundant
+(** [eval_many tl ss] materializes each formula in [ss] against [tl], sharing a single memoization
+    context. Use this when evaluating multiple formulas that share subexpressions to avoid redundant
     computation.
 
     @raise Cycle_error if a same-period cycle is detected.
@@ -296,7 +296,7 @@ val eval_many : Timeline.t -> 'c t list -> float array list
 
 module Materialized : sig
   type 'c t
-  (** The type for materialized series results. Each value is bound to its period. *)
+  (** The type for materialized formula results. Each value is bound to its period. *)
 
   val make : Timeline.t -> float array -> 'c t
   (** [make tl values] is a materialized result binding [values] to the periods of [tl]. *)
@@ -332,7 +332,7 @@ val eval_materialized : Timeline.t -> 'c t -> 'c Materialized.t
 
 (** {1:syntax Infix syntax}
 
-    Open this module to use arithmetic operators on series.
+    Open this module to use arithmetic operators on formulas.
 
     {b Warning.} This shadows the [Stdlib] integer operators [( + )], [( - )], [( * )] and [( / )].
 *)
@@ -396,9 +396,9 @@ module Query : sig
       Typical usage with a {!scan}-based balance:
 
       {[
-        let flow_v = Series.eval tl flow in
-        let balance_v = Series.eval tl balance in
-        Series.Query.balance_at tl ~balance:balance_v ~flow:flow_v (Date.make 2025 7 1)
+        let flow_v = Formula.eval tl flow in
+        let balance_v = Formula.eval tl balance in
+        Formula.Query.balance_at tl ~balance:balance_v ~flow:flow_v (Date.make 2025 7 1)
       ]}
 
       @raise Invalid_argument if [date] is outside [tl]. *)

@@ -1,6 +1,6 @@
 (** Basic Income Statement
 
-    Builds on the Coffee Shop example by introducing cross-period dependencies with [Series.prev]
+    Builds on the Coffee Shop example by introducing cross-period dependencies with [Formula.prev]
     and custom timeline construction via [Timeline.make] + [Period.make_offset].
 
     The dependency graph is naturally acyclic -- no delay or lazy needed -- except for services
@@ -32,31 +32,31 @@ let tl = Timeline.make ~start_date ~offset:(Period.make_offset ~quarters:1 ()) ~
 (* Revenue *)
 
 let software =
-  Series.growth_simple ~name:"Software" ~start_date ~rate:software_growth software_first
+  Formula.growth_simple ~name:"Software" ~start_date ~rate:software_growth software_first
 
 (* Operating Expenses *)
 
-let cogs = Series.named "COGS" (Series.scale cogs_pct software)
-let admin = Series.growth_simple ~name:"Admin" ~start_date ~rate:admin_rate admin_first
-let opex_total = Series.sum ~name:"OpEx Total" [ cogs; admin ]
+let cogs = Formula.named "COGS" (Formula.scale cogs_pct software)
+let admin = Formula.growth_simple ~name:"Admin" ~start_date ~rate:admin_rate admin_first
+let opex_total = Formula.sum ~name:"OpEx Total" [ cogs; admin ]
 
 (* Revenue (Continued) *)
 
-(* Series.prev shifts a series forward by one period, producing ~default
-   at period 0. Combined with Series.map, this lets services revenue
+(* Formula.prev shifts a series forward by one period, producing ~default
+   at period 0. Combined with Formula.map, this lets services revenue
    depend on the *prior* period's OpEx without introducing a same-period
    cycle. Period 0 falls back to a fixed estimate since there is no
    prior OpEx yet. *)
 let services =
-  Series.map ~name:"Services"
+  Formula.map ~name:"Services"
     (fun prev_opex -> if prev_opex = 0.0 then 500.0 else prev_opex *. services_multiple_opex)
-    (Series.prev opex_total ~default:0.0)
+    (Formula.prev opex_total ~default:0.0)
 
-let revenue_total = Series.named "Revenue Total" (Series.add software services)
+let revenue_total = Formula.named "Revenue Total" (Formula.add software services)
 
 (* Income *)
 
-let income = Series.named "Income" (Series.add revenue_total opex_total)
+let income = Formula.named "Income" (Formula.add revenue_total opex_total)
 
 (* Statement *)
 
@@ -84,6 +84,6 @@ let () =
   (* Dependency graph *)
   let oc = open_out "model.dot" in
   let ppf = Format.formatter_of_out_channel oc in
-  Series.Deps.pp_dot ppf [ income ];
+  Formula.Deps.pp_dot ppf [ income ];
   Format.pp_print_flush ppf ();
   close_out oc

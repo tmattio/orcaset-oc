@@ -5,7 +5,7 @@
 
 (** Finite ordered sequences of periods.
 
-    A timeline is an array of contiguous {!Period.t} values against which all {!Series.t} are
+    A timeline is an array of contiguous {!Period.t} values against which all {!Formula.t} are
     evaluated. Every series in a model shares the same timeline, which fixes the number of output
     values and the calendar boundaries of each cell.
 

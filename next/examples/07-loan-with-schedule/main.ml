@@ -9,7 +9,7 @@
     - Loan amortization on the schedule's own timeline
     - Interest accrual from unadjusted periods
     - Quarterly payments bridged to the monthly model via {!Schedule.to_events} +
-      {!Series.of_events} *)
+      {!Formula.of_events} *)
 
 open Orcaset2
 
@@ -50,46 +50,46 @@ let quarterly_payment =
    from the contractual coupon date to the next, regardless of weekend shifts. *)
 let accrual_yf =
   let unadj_periods = Schedule.unadjusted_periods loan_sched in
-  Series.init ~name:"Year Fracs" (fun i _p ->
+  Formula.init ~name:"Year Fracs" (fun i _p ->
       let up = unadj_periods.(i) in
       Daycount.actual_360 (Period.start_date up) (Period.end_date up))
 
-let total_pmt = Series.const ~name:"Quarterly Payment" (-.quarterly_payment)
+let total_pmt = Formula.const ~name:"Quarterly Payment" (-.quarterly_payment)
 
 let loan_balance, (interest_pmt, principal_pmt) =
-  Series.feedback ~name:"Loan Balance" ~default:loan_amount (fun prev_bal ->
+  Formula.feedback ~name:"Loan Balance" ~default:loan_amount (fun prev_bal ->
       let interest =
-        Series.named "Interest" (Series.scale (-.annual_rate) (Series.mul prev_bal accrual_yf))
+        Formula.named "Interest" (Formula.scale (-.annual_rate) (Formula.mul prev_bal accrual_yf))
       in
-      let principal = Series.named "Principal" (Series.sub total_pmt interest) in
-      let balance = Series.cumsum ~init:loan_amount principal in
+      let principal = Formula.named "Principal" (Formula.sub total_pmt interest) in
+      let balance = Formula.cumsum ~init:loan_amount principal in
       (balance, (balance, (interest, principal))))
 
 (* Bridge quarterly loan events into the monthly model. *)
 
 let bridge_to_monthly name series =
-  let vals = Series.eval loan_tl series in
-  Series.of_events ~name (Schedule.to_events (fun i _p -> vals.(i)) loan_sched)
+  let vals = Formula.eval loan_tl series in
+  Formula.of_events ~name (Schedule.to_events (fun i _p -> vals.(i)) loan_sched)
 
 let monthly_interest = bridge_to_monthly "Loan Interest" interest_pmt
 let monthly_principal = bridge_to_monthly "Loan Principal" principal_pmt
 
 let monthly_debt_service =
-  Series.named "Debt Service" (Series.add monthly_interest monthly_principal)
+  Formula.named "Debt Service" (Formula.add monthly_interest monthly_principal)
 
 (* Operating Model *)
 
 let revenue =
-  Series.growth_simple ~name:"Revenue" ~start_date:model_start ~rate:0.08
+  Formula.growth_simple ~name:"Revenue" ~start_date:model_start ~rate:0.08
     ~daycount:Daycount.calendar_monthly 500_000.0
 
 let opex =
-  Series.growth_simple ~name:"Operating Expenses" ~start_date:model_start ~rate:0.03
+  Formula.growth_simple ~name:"Operating Expenses" ~start_date:model_start ~rate:0.03
     ~daycount:Daycount.calendar_monthly (-200_000.0)
 
-let noi = Series.named "NOI" (Series.add revenue opex)
-let cfaf = Series.named "CFAF" (Series.add noi monthly_debt_service)
-let cash = Series.cumsum ~name:"Cash Balance" ~init:2_000_000.0 cfaf
+let noi = Formula.named "NOI" (Formula.add revenue opex)
+let cfaf = Formula.named "CFAF" (Formula.add noi monthly_debt_service)
+let cash = Formula.cumsum ~name:"Cash Balance" ~init:2_000_000.0 cfaf
 
 (* Output *)
 
@@ -128,9 +128,9 @@ let () =
   (* Loan amortization on loan timeline *)
   Printf.printf "LOAN AMORTIZATION (first 8 quarters)\n";
   Printf.printf "=====================================\n";
-  let bal_v = Series.eval loan_tl loan_balance in
-  let int_v = Series.eval loan_tl interest_pmt in
-  let pri_v = Series.eval loan_tl principal_pmt in
+  let bal_v = Formula.eval loan_tl loan_balance in
+  let int_v = Formula.eval loan_tl interest_pmt in
+  let pri_v = Formula.eval loan_tl principal_pmt in
   Printf.printf "%3s  %12s  %14s  %12s  %12s  %14s\n" "Q" "Pay Date" "Beg Balance" "Interest"
     "Principal" "End Balance";
   Printf.printf "%s\n" (String.make 75 '-');
@@ -175,6 +175,6 @@ let () =
   (* Dependency graph *)
   let oc = open_out "model.dot" in
   let ppf = Format.formatter_of_out_channel oc in
-  Series.Deps.pp_dot ppf [ cfaf; cash ];
+  Formula.Deps.pp_dot ppf [ cfaf; cash ];
   Format.pp_print_flush ppf ();
   close_out oc

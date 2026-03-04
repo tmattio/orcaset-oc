@@ -11,12 +11,12 @@
     v}
 
     Non-recurring revenue follows a random walk with drift and volatility, demonstrating
-    [Series.scan] as a replacement for the old [Seq.unfold] pattern.
+    [Formula.scan] as a replacement for the old [Seq.unfold] pattern.
 
     Group totals are synthesized automatically by [Statement.auto_total] (called implicitly by
     [Statement.eval]) -- no explicit totals needed.
 
-    Demonstrates: [Series.init], [Series.scan], [Series.scale], [Statement.group] (auto_total),
+    Demonstrates: [Formula.init], [Formula.scan], [Formula.scale], [Statement.group] (auto_total),
     [Statement.eval], [Statement.pp], [Statement.lines]. *)
 
 open Orcaset2
@@ -42,16 +42,16 @@ let tl = Timeline.monthly ~start_date ~n:12
 (* Revenue *)
 
 let recurring_revenue =
-  Series.growth_simple ~name:"Recurring Revenue" ~start_date ~rate:recurring_growth recurring_first
+  Formula.growth_simple ~name:"Recurring Revenue" ~start_date ~rate:recurring_growth recurring_first
 
 (* Non-recurring revenue: random walk with drift and volatility.
-   Series.scan accumulates over a shock series -- each period's value
+   Formula.scan accumulates over a shock series -- each period's value
    depends on the previous period's output, drift, and a random shock. *)
 let rng = Random.State.make [| seed |]
 
 (* Approximate normal shocks via sum of 12 uniforms (central limit theorem). *)
 let shocks =
-  Series.init ~name:"Shocks" (fun _i _p ->
+  Formula.init ~name:"Shocks" (fun _i _p ->
       let sum_uniforms =
         List.init 12 (fun _ -> Random.State.float rng 1.0) |> List.fold_left ( +. ) 0.0
       in
@@ -59,21 +59,21 @@ let shocks =
 
 (* scan ~init feeds the previous output back as ~acc, building a running walk. *)
 let non_recurring_revenue =
-  Series.scan ~name:"Non-Recurring Revenue" ~init:non_recurring_first
+  Formula.scan ~name:"Non-Recurring Revenue" ~init:non_recurring_first
     (fun ~acc ~x -> acc +. non_recurring_drift +. x)
     shocks
 
 (* Cost of Revenue *)
 
 let recurring_cost =
-  Series.named "Recurring Cost" (Series.scale recurring_cost_pct recurring_revenue)
+  Formula.named "Recurring Cost" (Formula.scale recurring_cost_pct recurring_revenue)
 
 let non_recurring_cost =
-  Series.named "Non-Recurring Cost" (Series.scale non_recurring_cost_pct non_recurring_revenue)
+  Formula.named "Non-Recurring Cost" (Formula.scale non_recurring_cost_pct non_recurring_revenue)
 
 (* Admin Expenses *)
 
-let admin = Series.growth_simple ~name:"Admin" ~start_date ~rate:admin_rate admin_first
+let admin = Formula.growth_simple ~name:"Admin" ~start_date ~rate:admin_rate admin_first
 
 (* Statement *)
 
@@ -136,7 +136,7 @@ let () =
   (* Dependency graph *)
   let oc = open_out "model.dot" in
   let dot_ppf = Format.formatter_of_out_channel oc in
-  Series.Deps.pp_dot dot_ppf
+  Formula.Deps.pp_dot dot_ppf
     [ recurring_revenue; non_recurring_revenue; recurring_cost; non_recurring_cost; admin ];
   Format.pp_print_flush dot_ppf ();
   close_out oc

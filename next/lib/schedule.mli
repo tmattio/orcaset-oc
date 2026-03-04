@@ -13,7 +13,7 @@
 
     Schedules are generated from a date range and a {!Period.offset}, with optional conventions for
     {!roll}, {!stub} handling, and business day adjustment. Convert the result to a {!Timeline.t}
-    via {!to_timeline} for use with {!Series.eval}.
+    via {!to_timeline} for use with {!Formula.eval}.
 
     {[
       let sched =
@@ -22,7 +22,7 @@
           ~bdc:Modified_following ~calendar:Calendar.weekdays ()
 
       let loan_tl = Schedule.to_timeline sched
-      let values = Series.eval loan_tl interest
+      let values = Formula.eval loan_tl interest
     ]}
 
     {b Schedule vs Timeline.} {!Timeline.make} shifts dates sequentially, which causes day-of-month
@@ -127,7 +127,7 @@ val to_unadjusted_timeline : t -> Timeline.t
 val to_events :
   ?at:[ `Start | `End ] -> (int -> Period.t -> float) -> t -> (Date.t * float) list
 (** [to_events ~at f s] pairs each adjusted period's date with [f i period], producing an event
-    list suitable for {!Series.of_events}. [at] selects whether the event date is the period's
+    list suitable for {!Formula.of_events}. [at] selects whether the event date is the period's
     start date ([`Start], the default) or end date ([`End]). [i] is the zero-based period index and
     [period] is the adjusted period.
 

@@ -5,7 +5,7 @@
 
 (** Hierarchical statement structure.
 
-    A statement is a tree of labeled data, typically {!Series.t} values, organized into the sections
+    A statement is a tree of labeled data, typically {!Formula.t} values, organized into the sections
     and line items of a financial statement (income statements, balance sheets, cash flow
     statements, etc.).
 
@@ -30,8 +30,8 @@
 
     {1 Evaluating}
 
-    Use {!eval} to materialize a [Series.t item] into a [float array item] against a {!Timeline.t}.
-    All series in the tree share a single memoization context via {!Series.eval_many}.
+    Use {!eval} to materialize a [Formula.t item] into a [float array item] against a {!Timeline.t}.
+    All formulas in the tree share a single memoization context via {!Formula.eval_many}.
 
     {1 Traversing}
 
@@ -87,29 +87,29 @@ val lines : 'a item -> (string * 'a) list
 
 (** {1:evaluation Evaluation} *)
 
-val auto_total : 'c Series.t item -> 'c Series.t item
+val auto_total : 'c Formula.t item -> 'c Formula.t item
 (** [auto_total item] fills in missing group totals. For each {!Group} without an explicit total,
     synthesizes one by summing the data of its direct children: each child {!Line} contributes its
     data, and each child {!Group} contributes its total (if any). Children with no extractable data
     are skipped. Groups that already have a total are unchanged. Operates recursively, bottom-up.
 
     {!eval} calls this automatically before materializing. Call [auto_total] directly only to
-    inspect the series tree prior to evaluation. *)
+    inspect the formula tree prior to evaluation. *)
 
-val eval : Timeline.t -> 'c Series.t item -> float array item
-(** [eval tl item] materializes every series in [item] against [tl].
+val eval : Timeline.t -> 'c Formula.t item -> float array item
+(** [eval tl item] materializes every formula in [item] against [tl].
 
-    Applies {!auto_total} first, then evaluates all series in a single shared memoization context
-    via {!Series.eval_many}. The result is a structurally identical tree with [float array] data.
+    Applies {!auto_total} first, then evaluates all formulas in a single shared memoization context
+    via {!Formula.eval_many}. The result is a structurally identical tree with [float array] data.
 
-    Raises [Series.Cycle_error] if a same-period cycle is detected. *)
+    Raises [Formula.Cycle_error] if a same-period cycle is detected. *)
 
-val eval_materialized : Timeline.t -> 'c Series.t item -> 'c Series.Materialized.t item
-(** [eval_materialized tl item] is like {!eval} but returns {!Series.Materialized.t} values that
+val eval_materialized : Timeline.t -> 'c Formula.t item -> 'c Formula.Materialized.t item
+(** [eval_materialized tl item] is like {!eval} but returns {!Formula.Materialized.t} values that
     keep period bindings attached to each result array. Applies {!auto_total} first and shares a
     single memoization context.
 
-    Raises [Series.Cycle_error] if a same-period cycle is detected. *)
+    Raises [Formula.Cycle_error] if a same-period cycle is detected. *)
 
 (** {1:pp Pretty-printing} *)
 

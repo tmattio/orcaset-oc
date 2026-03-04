@@ -5,10 +5,10 @@
     minus interest).
 
     Key API patterns demonstrated:
-    - Mutual recursion between balance and interest via [Series.delay] + [Series.prev]
-    - Running balance with [Series.cumsum]
-    - Day count fractions with [Series.init] and [Daycount]
-    - Mid-period balance queries with [Series.Query.balance_at] *)
+    - Mutual recursion between balance and interest via [Formula.delay] + [Formula.prev]
+    - Running balance with [Formula.cumsum]
+    - Day count fractions with [Formula.init] and [Daycount]
+    - Mid-period balance queries with [Formula.Query.balance_at] *)
 
 open Orcaset2
 
@@ -33,11 +33,11 @@ let monthly_payment =
   loan_amount *. (r *. factor) /. (factor -. 1.0)
 
 (* Negative: payments are outflows from the borrower's perspective *)
-let total_pmt = Series.const (-.monthly_payment)
+let total_pmt = Formula.const (-.monthly_payment)
 
 (* Year Fractions *)
 
-let year_fracs = Series.year_frac ~name:"Year Fracs" Daycount.thirty_360_us
+let year_fracs = Formula.year_frac ~name:"Year Fracs" Daycount.thirty_360_us
 
 (* Loan Amortization *)
 
@@ -50,21 +50,21 @@ let year_fracs = Series.year_frac ~name:"Year Fracs" Daycount.thirty_360_us
      principal.(i) = total_pmt.(i) - interest.(i)
      balance.(i)   = balance.(i-1) + principal.(i) *)
 let balance, (interest_pmt, principal_pmt) =
-  Series.feedback ~name:"Balance" ~default:loan_amount (fun prev_bal ->
+  Formula.feedback ~name:"Balance" ~default:loan_amount (fun prev_bal ->
       let interest =
-        Series.named "Interest" (Series.scale (-.annual_rate) (Series.mul prev_bal year_fracs))
+        Formula.named "Interest" (Formula.scale (-.annual_rate) (Formula.mul prev_bal year_fracs))
       in
-      let principal = Series.named "Principal" (Series.sub total_pmt interest) in
-      let balance = Series.cumsum ~init:loan_amount principal in
+      let principal = Formula.named "Principal" (Formula.sub total_pmt interest) in
+      let balance = Formula.cumsum ~init:loan_amount principal in
       (balance, (balance, (interest, principal))))
 
 (* Output *)
 
 let () =
-  let balance_values = Series.eval tl balance in
-  let interest_values = Series.eval tl interest_pmt in
-  let principal_values = Series.eval tl principal_pmt in
-  let total_values = Series.eval tl total_pmt in
+  let balance_values = Formula.eval tl balance in
+  let interest_values = Formula.eval tl interest_pmt in
+  let principal_values = Formula.eval tl principal_pmt in
+  let total_values = Formula.eval tl total_pmt in
 
   Printf.printf "=== Fixed-Rate Amortizing Loan Schedule ===\n";
   Printf.printf "Loan Amount:     $%.2f\n" loan_amount;
@@ -84,7 +84,7 @@ let () =
   Printf.printf "Difference:            $%.2f\n" (loan_amount -. total_principal);
   Printf.printf "\n";
 
-  (* Series.Query.balance_at interpolates the balance at any date, even
+  (* Formula.Query.balance_at interpolates the balance at any date, even
      mid-period, by pro-rating the current period's principal flow *)
   Printf.printf "=== Loan Balance Queries ===\n";
   let query_dates =
@@ -92,7 +92,7 @@ let () =
   in
   List.iter
     (fun d ->
-      let bal = Series.Query.balance_at tl ~balance:balance_values ~flow:principal_values d in
+      let bal = Formula.Query.balance_at tl ~balance:balance_values ~flow:principal_values d in
       Printf.printf "Balance on %s: $%.2f\n" (Date.to_string d) bal)
     query_dates;
   Printf.printf "\n";
@@ -116,6 +116,6 @@ let () =
   (* Dependency graph *)
   let oc = open_out "model.dot" in
   let ppf = Format.formatter_of_out_channel oc in
-  Series.Deps.pp_dot ppf [ balance; interest_pmt; principal_pmt ];
+  Formula.Deps.pp_dot ppf [ balance; interest_pmt; principal_pmt ];
   Format.pp_print_flush ppf ();
   close_out oc

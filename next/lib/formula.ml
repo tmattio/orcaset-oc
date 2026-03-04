@@ -325,7 +325,7 @@ and compute ctx s i =
         end
       in
       iterate initial 0
-  | Delay _ -> failwith "Series.compute: unexpected unresolved Delay"
+  | Delay _ -> failwith "Formula.compute: unexpected unresolved Delay"
 
 let make_ctx tl =
   let n = Timeline.length tl in
@@ -410,7 +410,7 @@ module Query = struct
     match Timeline.find_index tl date with
     | None ->
         invalid_arg
-          (Printf.sprintf "Series.Query.interpolate: date %s is outside the timeline"
+          (Printf.sprintf "Formula.Query.interpolate: date %s is outside the timeline"
              (Date.to_string date))
     | Some i ->
         let before, _ = call_split_fn split_fn tl i ~split_date:date ~value:values.(i) in
@@ -458,7 +458,7 @@ module Query = struct
     match Timeline.find_index tl date with
     | None ->
         invalid_arg
-          (Printf.sprintf "Series.Query.balance_at: date %s is outside the timeline"
+          (Printf.sprintf "Formula.Query.balance_at: date %s is outside the timeline"
              (Date.to_string date))
     | Some i ->
         let prev_balance = if i = 0 then balance.(0) -. flow.(0) else balance.(i - 1) in

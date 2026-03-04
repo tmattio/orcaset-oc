@@ -5,11 +5,11 @@
     (CFAF).
 
     Key patterns demonstrated:
-    - [Series.feedback] to break a circular dependency: CAM recoveries depend on prior-period OpEx,
+    - [Formula.feedback] to break a circular dependency: CAM recoveries depend on prior-period OpEx,
       while OpEx includes management fees that depend on current-period EGI.
-    - [Series.growth_simple] for calendar-aware annual growth.
-    - [Series.year_frac] and [Series.mul] for interest calculations.
-    - [Series.cumsum] for a running loan balance.
+    - [Formula.growth_simple] for calendar-aware annual growth.
+    - [Formula.year_frac] and [Formula.mul] for interest calculations.
+    - [Formula.cumsum] for a running loan balance.
     - [Statement.group] with explicit [~total] to build a hierarchical pro forma report. *)
 
 open Orcaset2
@@ -66,37 +66,37 @@ let base_rent_monthly = building_sf *. base_rent_per_sf_year1 /. 12.0
 let parking_monthly = float_of_int parking_spaces *. parking_rate_monthly
 
 let base_rent =
-  Series.growth_simple ~name:"Base Rent" ~start_date ~rate:rent_growth base_rent_monthly
+  Formula.growth_simple ~name:"Base Rent" ~start_date ~rate:rent_growth base_rent_monthly
 
-let parking = Series.growth_simple ~name:"Parking" ~start_date ~rate:rent_growth parking_monthly
+let parking = Formula.growth_simple ~name:"Parking" ~start_date ~rate:rent_growth parking_monthly
 
 let other_income =
-  Series.growth_simple ~name:"Other Income" ~start_date ~rate:rent_growth other_income_monthly
+  Formula.growth_simple ~name:"Other Income" ~start_date ~rate:rent_growth other_income_monthly
 
 (* Operating Expenses (non-EGI-dependent) *)
 
 let property_taxes =
-  Series.growth_simple ~name:"Property Taxes" ~start_date ~rate:expense_growth
+  Formula.growth_simple ~name:"Property Taxes" ~start_date ~rate:expense_growth
     (-.property_taxes_annual /. 12.0)
 
 let insurance =
-  Series.growth_simple ~name:"Insurance" ~start_date ~rate:expense_growth
+  Formula.growth_simple ~name:"Insurance" ~start_date ~rate:expense_growth
     (-.insurance_annual /. 12.0)
 
 let utilities =
-  Series.growth_simple ~name:"Utilities" ~start_date ~rate:expense_growth (-.utilities_monthly)
+  Formula.growth_simple ~name:"Utilities" ~start_date ~rate:expense_growth (-.utilities_monthly)
 
 let repairs_maintenance =
-  Series.growth_simple ~name:"Repairs" ~start_date ~rate:expense_growth (-.repairs_monthly)
+  Formula.growth_simple ~name:"Repairs" ~start_date ~rate:expense_growth (-.repairs_monthly)
 
 let janitorial =
-  Series.growth_simple ~name:"Janitorial" ~start_date ~rate:expense_growth (-.janitorial_monthly)
+  Formula.growth_simple ~name:"Janitorial" ~start_date ~rate:expense_growth (-.janitorial_monthly)
 
 let landscaping =
-  Series.growth_simple ~name:"Landscaping" ~start_date ~rate:expense_growth (-.landscaping_monthly)
+  Formula.growth_simple ~name:"Landscaping" ~start_date ~rate:expense_growth (-.landscaping_monthly)
 
 let security =
-  Series.growth_simple ~name:"Security" ~start_date ~rate:expense_growth (-.security_monthly)
+  Formula.growth_simple ~name:"Security" ~start_date ~rate:expense_growth (-.security_monthly)
 
 (* Revenue ↔ OpEx feedback loop *)
 
@@ -104,25 +104,25 @@ let security =
    (% of EGI), and EGI includes CAM. [feedback] breaks the cycle: the function
    receives the prior period's opex_total and returns the current definition. *)
 let cam_recoveries, gross_potential_rent, vacancy_loss, egi, property_management, opex_total =
-  Series.feedback ~default:0.0 (fun prev_opex ->
+  Formula.feedback ~default:0.0 (fun prev_opex ->
       let cam_recoveries =
-        Series.map ~name:"CAM Recoveries"
+        Formula.map ~name:"CAM Recoveries"
           (fun prev ->
             if prev = 0.0 then cam_estimate_first else Float.abs prev *. cam_recovery_pct)
           prev_opex
       in
       let gross_potential_rent =
-        Series.sum ~name:"GPR" [ base_rent; parking; cam_recoveries; other_income ]
+        Formula.sum ~name:"GPR" [ base_rent; parking; cam_recoveries; other_income ]
       in
       let vacancy_loss =
-        Series.named "Vacancy Loss" (Series.scale (-.vacancy_rate) gross_potential_rent)
+        Formula.named "Vacancy Loss" (Formula.scale (-.vacancy_rate) gross_potential_rent)
       in
-      let egi = Series.named "EGI" (Series.add gross_potential_rent vacancy_loss) in
+      let egi = Formula.named "EGI" (Formula.add gross_potential_rent vacancy_loss) in
       let property_management =
-        Series.named "Property Management" (Series.scale (-.management_fee_pct) egi)
+        Formula.named "Property Management" (Formula.scale (-.management_fee_pct) egi)
       in
       let opex_total =
-        Series.sum ~name:"Total OpEx"
+        Formula.sum ~name:"Total OpEx"
           [
             property_taxes;
             insurance;
@@ -140,23 +140,23 @@ let cam_recoveries, gross_potential_rent, vacancy_loss, egi, property_management
 
 (* Net Operating Income *)
 
-let noi = Series.named "NOI" (Series.add egi opex_total)
+let noi = Formula.named "NOI" (Formula.add egi opex_total)
 
 (* Capital Expenditures *)
 
-let capital_reserves = Series.named "Capital Reserves" (Series.scale (-.reserve_pct) egi)
+let capital_reserves = Formula.named "Capital Reserves" (Formula.scale (-.reserve_pct) egi)
 let ti_annual = ti_per_sf_annual *. building_sf
-let tenant_improvements = Series.const ~name:"Tenant Improvements" (-.ti_annual /. 12.0)
+let tenant_improvements = Formula.const ~name:"Tenant Improvements" (-.ti_annual /. 12.0)
 
 let leasing_commissions =
-  Series.named "Leasing Commissions" (Series.scale (-.leasing_commission_pct) egi)
+  Formula.named "Leasing Commissions" (Formula.scale (-.leasing_commission_pct) egi)
 
 let capex_total =
-  Series.sum ~name:"Total CapEx" [ capital_reserves; tenant_improvements; leasing_commissions ]
+  Formula.sum ~name:"Total CapEx" [ capital_reserves; tenant_improvements; leasing_commissions ]
 
 (* Cash Flow Before Financing *)
 
-let cfbf = Series.named "CFBF" (Series.add noi capex_total)
+let cfbf = Formula.named "CFBF" (Formula.add noi capex_total)
 
 (* Debt Service *)
 
@@ -166,28 +166,28 @@ let monthly_payment =
   let factor = (1.0 +. r) ** n in
   loan_amount *. (r *. factor) /. (factor -. 1.0)
 
-let debt_total_pmt = Series.const ~name:"Debt Payment" (-.monthly_payment)
-let year_fracs = Series.year_frac ~name:"Year Fracs" Daycount.actual_360
+let debt_total_pmt = Formula.const ~name:"Debt Payment" (-.monthly_payment)
+let year_fracs = Formula.year_frac ~name:"Year Fracs" Daycount.actual_360
 
 let _debt_balance, (debt_interest, debt_principal) =
-  Series.feedback ~name:"Loan Balance" ~default:loan_amount (fun prev_bal ->
+  Formula.feedback ~name:"Loan Balance" ~default:loan_amount (fun prev_bal ->
       let interest =
-        Series.named "Interest Expense"
-          (Series.scale (-.interest_rate) (Series.mul prev_bal year_fracs))
+        Formula.named "Interest Expense"
+          (Formula.scale (-.interest_rate) (Formula.mul prev_bal year_fracs))
       in
-      let principal = Series.named "Principal" (Series.sub debt_total_pmt interest) in
-      let balance = Series.cumsum ~init:loan_amount principal in
+      let principal = Formula.named "Principal" (Formula.sub debt_total_pmt interest) in
+      let balance = Formula.cumsum ~init:loan_amount principal in
       (balance, (balance, (interest, principal))))
 
-let debt_service = Series.named "Total Debt Service" (Series.add debt_interest debt_principal)
+let debt_service = Formula.named "Total Debt Service" (Formula.add debt_interest debt_principal)
 
 (* Cash Flow After Financing *)
 
-let cfaf = Series.named "CFAF" (Series.add cfbf debt_service)
+let cfaf = Formula.named "CFAF" (Formula.add cfbf debt_service)
 
 (* Statement *)
 
-(* Statement.group with an explicit ~total uses our pre-built Series for the
+(* Statement.group with an explicit ~total uses our pre-built Formula for the
    group total row. Without ~total, Statement.eval would auto-sum the children,
    which works here too but explicit totals let us reuse the same series
    (e.g. opex_total) in other calculations like NOI. *)
@@ -270,6 +270,6 @@ let () =
   (* Dependency graph *)
   let oc = open_out "model.dot" in
   let ppf = Format.formatter_of_out_channel oc in
-  Series.Deps.pp_dot ppf [ cfaf ];
+  Formula.Deps.pp_dot ppf [ cfaf ];
   Format.pp_print_flush ppf ();
   close_out oc

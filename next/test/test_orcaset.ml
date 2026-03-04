@@ -11,7 +11,7 @@ let fla msg exp act =
   check int (msg ^ " length") (Array.length exp) (Array.length act);
   Array.iteri (fun i e -> fl (Printf.sprintf "%s[%d]" msg i) e act.(i)) exp
 
-let ev msg tl s exp = fla msg exp (Series.eval tl s)
+let ev msg tl s exp = fla msg exp (Formula.eval tl s)
 let ds msg exp d = check string msg exp (Date.to_string d)
 let raises msg exn f = check_raises msg exn (fun () -> ignore (f ()))
 let invalid msg f = raises msg (Invalid_argument msg) f
@@ -210,148 +210,148 @@ let test_daycount () =
   let yf = Daycount.calendar_monthly (date 2025 1 1) (date 2025 7 1) in
   fl "cm neg" (-.yf) (Daycount.calendar_monthly (date 2025 7 1) (date 2025 1 1))
 
-(* Series: constructors *)
+(* Formula: constructors *)
 
-let test_series_constructors () =
-  ev "const" tl3 (Series.const 42.0) [| 42.0; 42.0; 42.0 |];
-  ev "of_array" tl3 (Series.of_array [| 1.0; 2.0 |]) [| 1.0; 2.0; 0.0 |];
-  ev "init" tl3 (Series.init (fun i _p -> float_of_int (i + 1))) [| 1.0; 2.0; 3.0 |];
+let test_formula_constructors () =
+  ev "const" tl3 (Formula.const 42.0) [| 42.0; 42.0; 42.0 |];
+  ev "of_array" tl3 (Formula.of_array [| 1.0; 2.0 |]) [| 1.0; 2.0; 0.0 |];
+  ev "init" tl3 (Formula.init (fun i _p -> float_of_int (i + 1))) [| 1.0; 2.0; 3.0 |];
   ev "init days" tl3
-    (Series.init (fun _i p -> Period.days p |> float_of_int))
+    (Formula.init (fun _i p -> Period.days p |> float_of_int))
     [| 31.0; 28.0; 31.0 |];
   ev "init_flow" tl3
-    (Series.init_flow (fun p -> Period.days p |> float_of_int))
+    (Formula.init_flow (fun p -> Period.days p |> float_of_int))
     [| 31.0; 28.0; 31.0 |];
   ev "init_tl" tl3
-    (Series.init_tl (fun tl _i _p -> float_of_int (Timeline.length tl)))
+    (Formula.init_tl (fun tl _i _p -> float_of_int (Timeline.length tl)))
     [| 3.0; 3.0; 3.0 |];
   (* of_events: aggregation, boundary placement, outside-timeline drop *)
   ev "of_events" tl3
-    (Series.of_events [ (date 2025 1 10, 100.0); (date 2025 1 20, 50.0); (date 2025 3 5, 200.0) ])
+    (Formula.of_events [ (date 2025 1 10, 100.0); (date 2025 1 20, 50.0); (date 2025 3 5, 200.0) ])
     [| 150.0; 0.0; 200.0 |];
-  ev "boundary" tl3 (Series.of_events [ (date 2025 2 1, 100.0) ]) [| 0.0; 100.0; 0.0 |];
+  ev "boundary" tl3 (Formula.of_events [ (date 2025 2 1, 100.0) ]) [| 0.0; 100.0; 0.0 |];
   ev "outside drop" tl3
-    (Series.of_events [ (date 2024 1 1, 999.0); (date 2025 1 15, 100.0); (date 2026 1 1, 999.0) ])
+    (Formula.of_events [ (date 2024 1 1, 999.0); (date 2025 1 15, 100.0); (date 2026 1 1, 999.0) ])
     [| 100.0; 0.0; 0.0 |];
   (* of_events: same series evaluated against two different timelines *)
-  let events = Series.of_events [ (date 2025 1 15, 100.0); (date 2025 4 10, 200.0) ] in
+  let events = Formula.of_events [ (date 2025 1 15, 100.0); (date 2025 4 10, 200.0) ] in
   let tl_short = Timeline.monthly ~start_date:(date 2025 1 1) ~n:2 in
   let tl_long = Timeline.monthly ~start_date:(date 2025 1 1) ~n:6 in
   ev "cross-tl short" tl_short events [| 100.0; 0.0 |];
   ev "cross-tl long" tl_long events [| 100.0; 0.0; 0.0; 200.0; 0.0; 0.0 |]
 
-(* Series: pointwise *)
+(* Formula: pointwise *)
 
-let test_series_pointwise () =
-  let a = Series.of_array [| 1.0; 5.0; 3.0 |] in
-  let b = Series.of_array [| 2.0; 4.0; 3.0 |] in
-  ev "add" tl3 (Series.add a b) [| 3.0; 9.0; 6.0 |];
-  ev "sub" tl3 (Series.sub a b) [| -1.0; 1.0; 0.0 |];
-  ev "mul" tl3 (Series.mul a b) [| 2.0; 20.0; 9.0 |];
-  ev "div" tl3 (Series.div a b) [| 0.5; 1.25; 1.0 |];
-  ev "neg" tl3 (Series.neg a) [| -1.0; -5.0; -3.0 |];
-  ev "abs" tl3 (Series.abs (Series.neg a)) [| 1.0; 5.0; 3.0 |];
-  ev "min" tl3 (Series.min a b) [| 1.0; 4.0; 3.0 |];
-  ev "max" tl3 (Series.max a b) [| 2.0; 5.0; 3.0 |];
-  ev "scale" tl3 (Series.scale 2.5 a) [| 2.5; 12.5; 7.5 |];
-  ev "clamp" tl3 (Series.clamp ~lo:2.0 ~hi:4.0 a) [| 2.0; 4.0; 3.0 |];
-  ev "round" tl3 (Series.round 2 (Series.of_array [| 1.005; 2.555; 3.999 |])) [| 1.0; 2.56; 4.0 |];
-  ev "sum" tl3 (Series.sum [ a; b; Series.const 10.0 ]) [| 13.0; 19.0; 16.0 |];
-  ev "map" tl3 (Series.map (fun x -> x *. 2.0) (Series.const 5.0)) [| 10.0; 10.0; 10.0 |];
-  ev "map2" tl3 (Series.map2 ( +. ) a b) [| 3.0; 9.0; 6.0 |];
+let test_formula_pointwise () =
+  let a = Formula.of_array [| 1.0; 5.0; 3.0 |] in
+  let b = Formula.of_array [| 2.0; 4.0; 3.0 |] in
+  ev "add" tl3 (Formula.add a b) [| 3.0; 9.0; 6.0 |];
+  ev "sub" tl3 (Formula.sub a b) [| -1.0; 1.0; 0.0 |];
+  ev "mul" tl3 (Formula.mul a b) [| 2.0; 20.0; 9.0 |];
+  ev "div" tl3 (Formula.div a b) [| 0.5; 1.25; 1.0 |];
+  ev "neg" tl3 (Formula.neg a) [| -1.0; -5.0; -3.0 |];
+  ev "abs" tl3 (Formula.abs (Formula.neg a)) [| 1.0; 5.0; 3.0 |];
+  ev "min" tl3 (Formula.min a b) [| 1.0; 4.0; 3.0 |];
+  ev "max" tl3 (Formula.max a b) [| 2.0; 5.0; 3.0 |];
+  ev "scale" tl3 (Formula.scale 2.5 a) [| 2.5; 12.5; 7.5 |];
+  ev "clamp" tl3 (Formula.clamp ~lo:2.0 ~hi:4.0 a) [| 2.0; 4.0; 3.0 |];
+  ev "round" tl3 (Formula.round 2 (Formula.of_array [| 1.005; 2.555; 3.999 |])) [| 1.0; 2.56; 4.0 |];
+  ev "sum" tl3 (Formula.sum [ a; b; Formula.const 10.0 ]) [| 13.0; 19.0; 16.0 |];
+  ev "map" tl3 (Formula.map (fun x -> x *. 2.0) (Formula.const 5.0)) [| 10.0; 10.0; 10.0 |];
+  ev "map2" tl3 (Formula.map2 ( +. ) a b) [| 3.0; 9.0; 6.0 |];
   (* where: cond <> 0 selects then_, else otherwise *)
-  let cond = Series.of_array [| 1.0; 0.0; 1.0 |] in
-  ev "where" tl3 (Series.where ~cond ~then_:a ~else_:b) [| 1.0; 4.0; 3.0 |];
+  let cond = Formula.of_array [| 1.0; 0.0; 1.0 |] in
+  ev "where" tl3 (Formula.where ~cond ~then_:a ~else_:b) [| 1.0; 4.0; 3.0 |];
   (* syntax spot-check *)
-  let open Series.Syntax in
+  let open Formula.Syntax in
   ev "+" tl3 (a + b) [| 3.0; 9.0; 6.0 |];
   ev "*$" tl3 (2.0 *$ a) [| 2.0; 10.0; 6.0 |]
 
-(* Series: cross-period *)
+(* Formula: cross-period *)
 
-let test_series_cross_period () =
-  let flow = Series.of_array [| 100.0; 200.0; 300.0 |] in
-  ev "prev" tl3 (Series.prev flow ~default:0.0) [| 0.0; 100.0; 200.0 |];
+let test_formula_cross_period () =
+  let flow = Formula.of_array [| 100.0; 200.0; 300.0 |] in
+  ev "prev" tl3 (Formula.prev flow ~default:0.0) [| 0.0; 100.0; 200.0 |];
   ev "scan" tl3
-    (Series.scan ~init:1000.0 (fun ~acc ~x -> acc +. x) flow)
+    (Formula.scan ~init:1000.0 (fun ~acc ~x -> acc +. x) flow)
     [| 1100.0; 1300.0; 1600.0 |];
-  ev "cumsum" tl3 (Series.cumsum ~init:1000.0 flow) [| 1100.0; 1300.0; 1600.0 |]
+  ev "cumsum" tl3 (Formula.cumsum ~init:1000.0 flow) [| 1100.0; 1300.0; 1600.0 |]
 
-(* Series: feedback *)
+(* Formula: feedback *)
 
-let test_series_feedback () =
+let test_formula_feedback () =
   (* counter: simplest self-referential feedback *)
   ev "counter" tl3
-    (Series.feedback ~default:0.0 (fun prev ->
-         let s = Series.map (fun v -> v +. 1.0) prev in
+    (Formula.feedback ~default:0.0 (fun prev ->
+         let s = Formula.map (fun v -> v +. 1.0) prev in
          (s, s)))
     [| 1.0; 2.0; 3.0 |];
   (* doubling *)
   ev "doubling" tl3
-    (Series.feedback ~default:1.0 (fun prev ->
-         let s = Series.map (fun v -> v *. 2.0) prev in
+    (Formula.feedback ~default:1.0 (fun prev ->
+         let s = Formula.map (fun v -> v *. 2.0) prev in
          (s, s)))
     [| 2.0; 4.0; 8.0 |];
   (* mutual recursion: a = 1 + prev(b), b = 2*a *)
   let a, b =
-    Series.feedback ~default:0.0 (fun prev_b ->
-        let a = Series.add (Series.const 1.0) prev_b in
-        let b = Series.scale 2.0 a in
+    Formula.feedback ~default:0.0 (fun prev_b ->
+        let a = Formula.add (Formula.const 1.0) prev_b in
+        let b = Formula.scale 2.0 a in
         (b, (a, b)))
   in
-  fla "mutual a" [| 1.0; 3.0; 7.0 |] (Series.eval tl3 a);
-  fla "mutual b" [| 2.0; 6.0; 14.0 |] (Series.eval tl3 b);
+  fla "mutual a" [| 1.0; 3.0; 7.0 |] (Formula.eval tl3 a);
+  fla "mutual b" [| 2.0; 6.0; 14.0 |] (Formula.eval tl3 b);
   (* interest accrual: balance depends on interest depends on prev balance *)
   let balance, interest =
-    Series.feedback ~default:100.0 (fun prev_bal ->
-        let interest = Series.map (fun b -> b *. 0.01) prev_bal in
-        let balance = Series.map2 (fun b i -> b +. 10.0 +. i) prev_bal interest in
+    Formula.feedback ~default:100.0 (fun prev_bal ->
+        let interest = Formula.map (fun b -> b *. 0.01) prev_bal in
+        let balance = Formula.map2 (fun b i -> b +. 10.0 +. i) prev_bal interest in
         (balance, (balance, interest)))
   in
-  let vb = Series.eval tl3 balance in
-  let vi = Series.eval tl3 interest in
+  let vb = Formula.eval tl3 balance in
+  let vi = Formula.eval tl3 interest in
   fl "bal[0]" 111.0 vb.(0);
   fl "bal[1]" 122.11 vb.(1);
   fl "int[0]" 1.0 vi.(0);
   fl "int[1]" 1.11 vi.(1)
 
-(* Series: fixpoint *)
+(* Formula: fixpoint *)
 
-let test_series_fixpoint () =
-  let c = Series.of_array [| 10.0; 20.0; 30.0 |] in
+let test_formula_fixpoint () =
+  let c = Formula.of_array [| 10.0; 20.0; 30.0 |] in
   (* x = 0.5*(x+c) converges to x=c *)
   ev "linear" tl3
-    (Series.fixpoint ~guess:0.0 (fun x -> Series.scale 0.5 (Series.add x c)))
+    (Formula.fixpoint ~guess:0.0 (fun x -> Formula.scale 0.5 (Formula.add x c)))
     [| 10.0; 20.0; 30.0 |];
   (* warm start: period 1 starts from period 0's converged value *)
-  let c2 = Series.of_array [| 10.0; 100.0; 100.0 |] in
+  let c2 = Formula.of_array [| 10.0; 100.0; 100.0 |] in
   ev "warm start" tl3
-    (Series.fixpoint ~guess:0.0 (fun x -> Series.scale 0.5 (Series.add x c2)))
+    (Formula.fixpoint ~guess:0.0 (fun x -> Formula.scale 0.5 (Formula.add x c2)))
     [| 10.0; 100.0; 100.0 |];
   (* fixpoint + feedback: flow converges to prev balance each period *)
   ev "fixpoint+feedback" tl3
-    (Series.feedback ~default:100.0 (fun prev_bal ->
+    (Formula.feedback ~default:100.0 (fun prev_bal ->
          let flow =
-           Series.fixpoint ~guess:0.0 (fun x -> Series.scale 0.5 (Series.add x prev_bal))
+           Formula.fixpoint ~guess:0.0 (fun x -> Formula.scale 0.5 (Formula.add x prev_bal))
          in
-         let balance = Series.cumsum ~init:100.0 flow in
+         let balance = Formula.cumsum ~init:100.0 flow in
          (balance, balance)))
     [| 200.0; 400.0; 800.0 |];
   (* divergence: x = 2x+1 *)
   raises "diverges"
-    (Series.Convergence_error { series_name = Some "divergent"; period_index = 0; iterations = 5 })
+    (Formula.Convergence_error { series_name = Some "divergent"; period_index = 0; iterations = 5 })
     (fun () ->
-      Series.eval tl3
-        (Series.fixpoint ~name:"divergent" ~max_iter:5 ~guess:0.0 (fun x ->
-             Series.add (Series.scale 2.0 x) (Series.const 1.0))));
+      Formula.eval tl3
+        (Formula.fixpoint ~name:"divergent" ~max_iter:5 ~guess:0.0 (fun x ->
+             Formula.add (Formula.scale 2.0 x) (Formula.const 1.0))));
   (* LTC construction loan: loan = ltc * (base_cost + loan*rate) *)
   let ltc = 0.8 and rate = 0.05 in
-  let base_cost = Series.of_array [| 1000.0; 2000.0; 3000.0 |] in
+  let base_cost = Formula.of_array [| 1000.0; 2000.0; 3000.0 |] in
   let loan =
-    Series.fixpoint ~guess:0.0 (fun commitment ->
-        Series.scale ltc (Series.add base_cost (Series.scale rate commitment)))
+    Formula.fixpoint ~guess:0.0 (fun commitment ->
+        Formula.scale ltc (Formula.add base_cost (Formula.scale rate commitment)))
   in
-  let values = Series.eval tl3 loan in
+  let values = Formula.eval tl3 loan in
   let expected i =
     let bc = [| 1000.0; 2000.0; 3000.0 |].(i) in
     ltc *. bc /. (1.0 -. (ltc *. rate))
@@ -360,85 +360,85 @@ let test_series_fixpoint () =
   fl "ltc[1]" (expected 1) values.(1);
   fl "ltc[2]" (expected 2) values.(2)
 
-(* Series: growth *)
+(* Formula: growth *)
 
-let test_series_growth () =
+let test_formula_growth () =
   let sd = date 2025 1 1 in
   (* zero rate: constant *)
   ev "zero rate" tl3
-    (Series.growth_simple ~start_date:sd ~rate:0.0 1000.0)
+    (Formula.growth_simple ~start_date:sd ~rate:0.0 1000.0)
     [| 1000.0; 1000.0; 1000.0 |];
   (* simple growth: monotonically increasing *)
-  let v = Series.eval tl3 (Series.growth_simple ~start_date:sd ~rate:1.0 1000.0) in
+  let v = Formula.eval tl3 (Formula.growth_simple ~start_date:sd ~rate:1.0 1000.0) in
   fl "simple p0" 1000.0 v.(0);
   check bool "simple grows" true (v.(2) > v.(1));
   (* simple growth with calendar_monthly daycount *)
   let v =
-    Series.eval tl3
-      (Series.growth_simple ~start_date:sd ~rate:1.0 ~daycount:Daycount.calendar_monthly 1200.0)
+    Formula.eval tl3
+      (Formula.growth_simple ~start_date:sd ~rate:1.0 ~daycount:Daycount.calendar_monthly 1200.0)
   in
   fl "cm p0" 1200.0 v.(0);
   let yf1 = Daycount.calendar_monthly sd (date 2025 2 1) in
   fl "cm p1" (1200.0 *. (1.0 +. yf1)) v.(1);
   (* compound growth *)
-  let v = Series.eval tl3 (Series.growth_compound ~start_date:sd ~rate:0.10 1000.0) in
+  let v = Formula.eval tl3 (Formula.growth_compound ~start_date:sd ~rate:0.10 1000.0) in
   fl "compound p0" 1000.0 v.(0);
   let yf2 = Daycount.actual_360 sd (date 2025 3 1) in
   fl "compound p2" (1000.0 *. ((1.0 +. 0.10) ** yf2)) v.(2);
   (* year_frac: matches daycount applied to each period *)
-  let v = Series.eval tl3 (Series.year_frac Daycount.thirty_360_us) in
+  let v = Formula.eval tl3 (Formula.year_frac Daycount.thirty_360_us) in
   fl "yf jan" (Daycount.thirty_360_us (date 2025 1 1) (date 2025 2 1)) v.(0);
   fl "yf feb" (Daycount.thirty_360_us (date 2025 2 1) (date 2025 3 1)) v.(1)
 
-(* Series: query *)
+(* Formula: query *)
 
-let test_series_query () =
+let test_formula_query () =
   let tl = Timeline.monthly ~start_date:(date 2025 1 1) ~n:3 in
   (* interpolate *)
   fl "interp jan16"
     (310.0 *. 15.0 /. 31.0)
-    (Series.Query.interpolate tl [| 310.0; 280.0; 310.0 |] (date 2025 1 16));
+    (Formula.Query.interpolate tl [| 310.0; 280.0; 310.0 |] (date 2025 1 16));
   raises "interp outside"
-    (Invalid_argument "Series.Query.interpolate: date 2024-01-01 is outside the timeline")
-    (fun () -> Series.Query.interpolate tl [| 100.0 |] (date 2024 1 1));
+    (Invalid_argument "Formula.Query.interpolate: date 2024-01-01 is outside the timeline")
+    (fun () -> Formula.Query.interpolate tl [| 100.0 |] (date 2024 1 1));
   (* accrue *)
   let vals = [| 100.0; 200.0; 300.0 |] in
   fl "accrue full" 600.0
-    (Series.Query.accrue tl vals ~start_date:(date 2025 1 1) ~end_date:(date 2025 4 1));
+    (Formula.Query.accrue tl vals ~start_date:(date 2025 1 1) ~end_date:(date 2025 4 1));
   fl "accrue feb" 200.0
-    (Series.Query.accrue tl vals ~start_date:(date 2025 2 1) ~end_date:(date 2025 3 1));
+    (Formula.Query.accrue tl vals ~start_date:(date 2025 2 1) ~end_date:(date 2025 3 1));
   fl "accrue partial"
     (310.0 *. 15.0 /. 31.0)
-    (Series.Query.accrue tl [| 310.0 |] ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 16));
+    (Formula.Query.accrue tl [| 310.0 |] ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 16));
   (* balance_at *)
-  let flow = Series.of_array [| 100.0; 200.0; 300.0 |] in
-  let balance = Series.cumsum ~init:1000.0 flow in
-  let fv = Series.eval tl flow and bv = Series.eval tl balance in
-  fl "bal jan1" 1000.0 (Series.Query.balance_at tl ~balance:bv ~flow:fv (date 2025 1 1));
+  let flow = Formula.of_array [| 100.0; 200.0; 300.0 |] in
+  let balance = Formula.cumsum ~init:1000.0 flow in
+  let fv = Formula.eval tl flow and bv = Formula.eval tl balance in
+  fl "bal jan1" 1000.0 (Formula.Query.balance_at tl ~balance:bv ~flow:fv (date 2025 1 1));
   fl "bal feb15"
     (1100.0 +. (200.0 *. 14.0 /. 28.0))
-    (Series.Query.balance_at tl ~balance:bv ~flow:fv (date 2025 2 15));
+    (Formula.Query.balance_at tl ~balance:bv ~flow:fv (date 2025 2 15));
   raises "bal outside"
-    (Invalid_argument "Series.Query.balance_at: date 2024-01-01 is outside the timeline") (fun () ->
-      Series.Query.balance_at tl ~balance:bv ~flow:fv (date 2024 1 1))
+    (Invalid_argument "Formula.Query.balance_at: date 2024-01-01 is outside the timeline") (fun () ->
+      Formula.Query.balance_at tl ~balance:bv ~flow:fv (date 2024 1 1))
 
 (* Materialized *)
 
 let test_materialized () =
-  let s = Series.of_array [| 10.0; 20.0; 30.0 |] in
-  let m = Series.eval_materialized tl3 s in
-  check int "length" 3 (Series.Materialized.length m);
-  fl "get 0" 10.0 (Series.Materialized.get m 0);
-  fl "get 2" 30.0 (Series.Materialized.get m 2);
-  ds "period 0 start" "2025-01-01" (Period.start_date (Series.Materialized.period m 0));
-  let pairs = Series.Materialized.to_list m in
+  let s = Formula.of_array [| 10.0; 20.0; 30.0 |] in
+  let m = Formula.eval_materialized tl3 s in
+  check int "length" 3 (Formula.Materialized.length m);
+  fl "get 0" 10.0 (Formula.Materialized.get m 0);
+  fl "get 2" 30.0 (Formula.Materialized.get m 2);
+  ds "period 0 start" "2025-01-01" (Period.start_date (Formula.Materialized.period m 0));
+  let pairs = Formula.Materialized.to_list m in
   check int "to_list len" 3 (List.length pairs);
   let sum =
-    Series.Materialized.fold (fun acc _p v -> acc +. v) 0.0 m
+    Formula.Materialized.fold (fun acc _p v -> acc +. v) 0.0 m
   in
   fl "fold sum" 60.0 sum;
   let count = ref 0 in
-  Series.Materialized.iter (fun _p _v -> incr count) m;
+  Formula.Materialized.iter (fun _p _v -> incr count) m;
   check int "iter count" 3 !count
 
 (* Statement *)
@@ -452,7 +452,7 @@ let test_statement () =
   let expenses =
     Statement.group "Expenses"
       [
-        Statement.line "Rent" (Series.const 2000.0); Statement.line "Salaries" (Series.const 3000.0);
+        Statement.line "Rent" (Formula.const 2000.0); Statement.line "Salaries" (Formula.const 3000.0);
       ]
   in
   (match
@@ -465,7 +465,7 @@ let test_statement () =
   (* eval preserves structure *)
   let income =
     Statement.group "Income"
-      [ Statement.line "Revenue" (Series.const 1000.0); Statement.line "COGS" (Series.const 300.0) ]
+      [ Statement.line "Revenue" (Formula.const 1000.0); Statement.line "COGS" (Formula.const 300.0) ]
   in
   check int "lines" 2 (List.length (Statement.lines (Statement.eval tl3 income)));
   (* pp output contains expected labels and numbers *)
@@ -473,10 +473,10 @@ let test_statement () =
   let rich =
     Statement.group "Income"
       [
-        Statement.line "Revenue" (Series.const 1000.0);
+        Statement.line "Revenue" (Formula.const 1000.0);
         Statement.group "Costs"
-          [ Statement.line "COGS" (Series.const 300.0); Statement.line "Rent" (Series.const 200.0) ];
-        Statement.line "Net" (Series.const 500.0);
+          [ Statement.line "COGS" (Formula.const 300.0); Statement.line "Rent" (Formula.const 200.0) ];
+        Statement.line "Net" (Formula.const 500.0);
       ]
   in
   let out = to_s (fun ppf -> Statement.pp (Statement.layout tl) ppf (Statement.eval tl rich)) in
@@ -492,7 +492,7 @@ let test_statement () =
   in
   let out =
     to_s (fun ppf ->
-        Statement.pp l ppf (Statement.eval tl2 (Statement.line "Test" (Series.const 42.0))))
+        Statement.pp l ppf (Statement.eval tl2 (Statement.line "Test" (Formula.const 42.0))))
   in
   check bool "custom P0" true (has "P0" out);
   check bool "custom sep" true (has "=====" out);
@@ -500,13 +500,13 @@ let test_statement () =
   let mat_stmt =
     Statement.eval_materialized tl3
       (Statement.group "G"
-         [ Statement.line "A" (Series.const 7.0); Statement.line "B" (Series.const 3.0) ])
+         [ Statement.line "A" (Formula.const 7.0); Statement.line "B" (Formula.const 3.0) ])
   in
   let mat_lines = Statement.lines mat_stmt in
   List.iter
     (fun (_, m) ->
-      check int "mat length" 3 (Series.Materialized.length m);
-      let p0 = Series.Materialized.period m 0 in
+      check int "mat length" 3 (Formula.Materialized.length m);
+      let p0 = Formula.Materialized.period m 0 in
       check bool "mat period" true (Date.equal (Period.start_date p0) (date 2025 1 1)))
     mat_lines;
   (* total is also materialized *)
@@ -515,35 +515,35 @@ let test_statement () =
        ~line_fn:(fun _ _ -> None)
        ~group_fn:(fun _ _ total -> total)
    with
-  | Some m -> fla "mat total" [| 10.0; 10.0; 10.0 |] (Series.Materialized.values m)
+  | Some m -> fla "mat total" [| 10.0; 10.0; 10.0 |] (Formula.Materialized.values m)
   | None -> fail "expected materialized total")
 
 (* Deps *)
 
 let test_deps () =
-  let a = Series.init ~name:"A" (fun _i _p -> 1.0) in
-  let b = Series.init ~name:"B" (fun _i _p -> 2.0) in
-  let c = Series.add a b |> Series.named "C" in
-  let nodes, edges = Series.Deps.graph [ c ] in
+  let a = Formula.init ~name:"A" (fun _i _p -> 1.0) in
+  let b = Formula.init ~name:"B" (fun _i _p -> 2.0) in
+  let c = Formula.add a b |> Formula.named "C" in
+  let nodes, edges = Formula.Deps.graph [ c ] in
   check int "nodes" 3 (List.length nodes);
   check int "edges" 2 (List.length edges);
   let names =
-    List.filter_map (fun (n : Series.Deps.node) -> n.name) nodes |> List.sort String.compare
+    List.filter_map (fun (n : Formula.Deps.node) -> n.name) nodes |> List.sort String.compare
   in
   check (list string) "names" [ "A"; "B"; "C" ] names;
   (* shared node deduplication *)
-  let shared = Series.init ~name:"Shared" (fun _i _p -> 1.0) in
-  let x = Series.map ~name:"X" (fun v -> v +. 1.0) shared in
-  let y = Series.map ~name:"Y" (fun v -> v *. 2.0) shared in
-  let z = Series.add x y |> Series.named "Z" in
-  let nodes, edges = Series.Deps.graph [ z ] in
+  let shared = Formula.init ~name:"Shared" (fun _i _p -> 1.0) in
+  let x = Formula.map ~name:"X" (fun v -> v +. 1.0) shared in
+  let y = Formula.map ~name:"Y" (fun v -> v *. 2.0) shared in
+  let z = Formula.add x y |> Formula.named "Z" in
+  let nodes, edges = Formula.Deps.graph [ z ] in
   check int "shared nodes" 4 (List.length nodes);
   check int "shared edges" 4 (List.length edges);
   (* named_only collapses unnamed intermediaries *)
-  let revenue = Series.init ~name:"Revenue" (fun _i _p -> 1000.0) in
-  let cogs = Series.map (fun x -> x *. 0.3) revenue |> Series.named "COGS" in
-  let gp = Series.sub revenue cogs |> Series.named "Gross Profit" in
-  let nodes, edges = Series.Deps.graph ~named_only:true [ gp ] in
+  let revenue = Formula.init ~name:"Revenue" (fun _i _p -> 1000.0) in
+  let cogs = Formula.map (fun x -> x *. 0.3) revenue |> Formula.named "COGS" in
+  let gp = Formula.sub revenue cogs |> Formula.named "Gross Profit" in
+  let nodes, edges = Formula.Deps.graph ~named_only:true [ gp ] in
   check int "named nodes" 3 (List.length nodes);
   check int "named edges" 3 (List.length edges)
 
@@ -746,20 +746,20 @@ let test_schedule () =
 let test_coffee_shop () =
   let tl = Timeline.monthly ~start_date:(date 2025 1 1) ~n:12 in
   let revenue =
-    Series.init ~name:"revenue" (fun _i p ->
+    Formula.init ~name:"revenue" (fun _i p ->
         let sd = Period.start_date p in
         8000.0 *. (1.0 +. (0.05 *. Daycount.calendar_monthly (date 2025 1 1) sd)))
   in
-  let cogs = Series.scale 0.30 revenue in
-  let rent = Series.const 2000.0 in
-  let salaries = Series.const 3500.0 in
-  let total_opex = Series.sum [ cogs; rent; salaries ] in
-  let net_income = Series.sub revenue total_opex in
-  let equipment = Series.of_events [ (date 2025 1 15, -15000.0) ] in
-  let total_flow = Series.add net_income equipment in
-  let cash = Series.cumsum ~name:"cash" ~init:50000.0 total_flow in
-  let rv = Series.eval tl revenue in
-  let cv = Series.eval tl cash in
+  let cogs = Formula.scale 0.30 revenue in
+  let rent = Formula.const 2000.0 in
+  let salaries = Formula.const 3500.0 in
+  let total_opex = Formula.sum [ cogs; rent; salaries ] in
+  let net_income = Formula.sub revenue total_opex in
+  let equipment = Formula.of_events [ (date 2025 1 15, -15000.0) ] in
+  let total_flow = Formula.add net_income equipment in
+  let cash = Formula.cumsum ~name:"cash" ~init:50000.0 total_flow in
+  let rv = Formula.eval tl revenue in
+  let cv = Formula.eval tl cash in
   fl "revenue m0" 8000.0 rv.(0);
   check bool "revenue grows" true (rv.(11) > rv.(0));
   fl "cash m0" 35100.0 cv.(0);
@@ -819,16 +819,16 @@ let () =
       ("Daycount", [ test_case "daycount" `Quick test_daycount ]);
       ("Calendar", [ test_case "calendar" `Quick test_calendar ]);
       ("Schedule", [ test_case "schedule" `Quick test_schedule ]);
-      ( "Series",
-        [
-          test_case "constructors" `Quick test_series_constructors;
-          test_case "pointwise" `Quick test_series_pointwise;
-          test_case "cross-period" `Quick test_series_cross_period;
-          test_case "feedback" `Quick test_series_feedback;
-          test_case "fixpoint" `Quick test_series_fixpoint;
-          test_case "growth" `Quick test_series_growth;
-          test_case "query" `Quick test_series_query;
-        ] );
+      ( "Formula",
+         [
+           test_case "constructors" `Quick test_formula_constructors;
+           test_case "pointwise" `Quick test_formula_pointwise;
+           test_case "cross-period" `Quick test_formula_cross_period;
+           test_case "feedback" `Quick test_formula_feedback;
+           test_case "fixpoint" `Quick test_formula_fixpoint;
+           test_case "growth" `Quick test_formula_growth;
+           test_case "query" `Quick test_formula_query;
+         ] );
       ("Materialized", [ test_case "materialized" `Quick test_materialized ]);
       ("Statement", [ test_case "statement" `Quick test_statement ]);
       ("Deps", [ test_case "deps" `Quick test_deps ]);

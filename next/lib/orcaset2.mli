@@ -9,8 +9,8 @@
 
     + Define {!Date}s and {!Period}s to establish calendar boundaries.
     + Build a {!Timeline} or {!Schedule} -- a finite sequence of periods shared by all computations.
-    + Describe {!Series} -- lazy, composable recipes that produce one [float] per period.
-    + Optionally, organize series into a hierarchical {!Statement} for structured output.
+    + Describe {!Formula} -- lazy, composable recipes that produce one [float] per period.
+    + Optionally, organize formulas into a hierarchical {!Statement} for structured output.
 
     Use {!Daycount} conventions for year fraction calculations (interest accrual, growth rates) and
     {!Calendar} conventions for business day adjustment.
@@ -23,10 +23,10 @@
       let () =
         let start = Date.make 2025 1 1 in
         let tl = Timeline.monthly ~start_date:start ~n:12 in
-        let revenue = Series.growth_simple ~start_date:start ~rate:0.05 8000.0 in
-        let expense = Series.const (-3000.0) in
-        let income = Series.add revenue expense in
-        let values = Series.eval tl income in
+        let revenue = Formula.growth_simple ~start_date:start ~rate:0.05 8000.0 in
+        let expense = Formula.const (-3000.0) in
+        let income = Formula.add revenue expense in
+        let values = Formula.eval tl income in
         Array.iter (fun v -> Printf.printf "%.0f\n" v) values
     ]}
 
@@ -34,7 +34,7 @@
 
     {1 Modules}
 
-    {!modules:Date Period Daycount Calendar Timeline Schedule Series Statement} *)
+    {!modules:Date Period Daycount Calendar Timeline Schedule Formula Statement} *)
 
 module Date : module type of Date
 (** Gregorian calendar dates. *)
@@ -60,7 +60,7 @@ module Key : module type of Key
 module Scope : module type of Scope
 (** Model-level registries for line-item definitions. *)
 
-module Series : module type of Series
+module Formula : module type of Formula
 (** Declarative computations over a timeline. *)
 
 module Statement : module type of Statement

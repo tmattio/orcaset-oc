@@ -4,12 +4,12 @@
     model (revenue, opex, capex, debt) evaluated against a shared timeline. Aggregation is
     parallelized across CPU cores with [Domain.spawn].
 
-    Each property's series are evaluated independently via [Series.eval_many], then the resulting
+    Each property's series are evaluated independently via [Formula.eval_many], then the resulting
     [float array] values are summed across properties. The final portfolio totals are assembled into
-    a [Statement] built from raw [float array] data rather than [Series.t] values -- showing that
+    a [Statement] built from raw [float array] data rather than [Formula.t] values -- showing that
     [Statement.group], [Statement.line], and [Statement.pp] work with pre-evaluated arrays.
 
-    Demonstrates: Series.eval_many, Statement.line, Statement.group, Statement.layout, Statement.pp,
+    Demonstrates: Formula.eval_many, Statement.line, Statement.group, Statement.layout, Statement.pp,
     Domain.spawn, parallel aggregation. *)
 
 open Orcaset2
@@ -60,12 +60,12 @@ type assumptions = {
   leasing_commission_pct : float;
 }
 
-(* Build all line items for a single property as (label, Series.t) pairs.
-   Returns unevaluated series -- the caller passes them to Series.eval_many
+(* Build all line items for a single property as (label, Formula.t) pairs.
+   Returns unevaluated series -- the caller passes them to Formula.eval_many
    to materialize the values against a timeline. *)
 let build_property (a : assumptions) =
   let annual_growth ~name ~initial ~rate =
-    Series.init ~name (fun _i p ->
+    Formula.init ~name (fun _i p ->
         let sd = Period.start_date p in
         initial *. (1.0 +. (rate *. Daycount.actual_360 start_date sd)))
   in
@@ -104,19 +104,19 @@ let build_property (a : assumptions) =
     annual_growth ~name:"Security" ~initial:(-.a.security_monthly) ~rate:a.expense_growth
   in
   let cam_recoveries, gpr, vacancy_loss, egi, management, opex_total =
-    Series.feedback ~default:0.0 (fun prev_opex ->
+    Formula.feedback ~default:0.0 (fun prev_opex ->
         let cam_recoveries =
-          Series.map ~name:"CAM Recoveries"
+          Formula.map ~name:"CAM Recoveries"
             (fun prev ->
               if prev = 0.0 then a.cam_estimate_first else Float.abs prev *. a.cam_recovery_pct)
             prev_opex
         in
-        let gpr = Series.sum ~name:"GPR" [ base_rent; parking; cam_recoveries; other_income ] in
-        let vacancy_loss = Series.named "Vacancy Loss" (Series.scale (-.a.vacancy_rate) gpr) in
-        let egi = Series.named "EGI" (Series.add gpr vacancy_loss) in
-        let management = Series.map ~name:"Management" (fun e -> -.e *. a.management_fee_pct) egi in
+        let gpr = Formula.sum ~name:"GPR" [ base_rent; parking; cam_recoveries; other_income ] in
+        let vacancy_loss = Formula.named "Vacancy Loss" (Formula.scale (-.a.vacancy_rate) gpr) in
+        let egi = Formula.named "EGI" (Formula.add gpr vacancy_loss) in
+        let management = Formula.map ~name:"Management" (fun e -> -.e *. a.management_fee_pct) egi in
         let opex_total =
-          Series.sum ~name:"Total OpEx"
+          Formula.sum ~name:"Total OpEx"
             [
               property_taxes;
               insurance;
@@ -132,20 +132,20 @@ let build_property (a : assumptions) =
   in
 
   (* NOI *)
-  let noi = Series.named "NOI" (Series.add egi opex_total) in
+  let noi = Formula.named "NOI" (Formula.add egi opex_total) in
 
   (* CapEx *)
-  let capital_reserves = Series.map ~name:"Capital Reserves" (fun e -> -.e *. a.reserve_pct) egi in
+  let capital_reserves = Formula.map ~name:"Capital Reserves" (fun e -> -.e *. a.reserve_pct) egi in
   let ti =
-    Series.const ~name:"Tenant Improvements" (-.(a.ti_per_sf_annual *. a.building_sf /. 12.0))
+    Formula.const ~name:"Tenant Improvements" (-.(a.ti_per_sf_annual *. a.building_sf /. 12.0))
   in
   let leasing_commissions =
-    Series.map ~name:"Leasing Commissions" (fun e -> -.e *. a.leasing_commission_pct) egi
+    Formula.map ~name:"Leasing Commissions" (fun e -> -.e *. a.leasing_commission_pct) egi
   in
-  let capex_total = Series.sum ~name:"Total CapEx" [ capital_reserves; ti; leasing_commissions ] in
+  let capex_total = Formula.sum ~name:"Total CapEx" [ capital_reserves; ti; leasing_commissions ] in
 
   (* CFBF *)
-  let cfbf = Series.named "CFBF" (Series.add noi capex_total) in
+  let cfbf = Formula.named "CFBF" (Formula.add noi capex_total) in
 
   let monthly_payment =
     let r = a.interest_rate /. 12.0 in
@@ -154,24 +154,24 @@ let build_property (a : assumptions) =
     loan_amount *. (r *. f) /. (f -. 1.0)
   in
   let year_fracs =
-    Series.init ~name:"Year Fracs" (fun _i p ->
+    Formula.init ~name:"Year Fracs" (fun _i p ->
         Daycount.actual_360 (Period.start_date p) (Period.end_date p))
   in
-  let total_pmt = Series.const ~name:"Debt Payment" (-.monthly_payment) in
+  let total_pmt = Formula.const ~name:"Debt Payment" (-.monthly_payment) in
   let _balance, (interest, principal) =
-    Series.feedback ~name:"Loan Balance" ~default:loan_amount (fun prev_bal ->
+    Formula.feedback ~name:"Loan Balance" ~default:loan_amount (fun prev_bal ->
         let interest =
-          Series.named "Interest"
-            (Series.map2 (fun bal yf -> -.bal *. a.interest_rate *. yf) prev_bal year_fracs)
+          Formula.named "Interest"
+            (Formula.map2 (fun bal yf -> -.bal *. a.interest_rate *. yf) prev_bal year_fracs)
         in
-        let principal = Series.named "Principal" (Series.sub total_pmt interest) in
-        let balance = Series.cumsum ~init:loan_amount principal in
+        let principal = Formula.named "Principal" (Formula.sub total_pmt interest) in
+        let balance = Formula.cumsum ~init:loan_amount principal in
         (balance, (balance, (interest, principal))))
   in
-  let debt_service = Series.named "Debt Service" (Series.add interest principal) in
+  let debt_service = Formula.named "Debt Service" (Formula.add interest principal) in
 
   (* CFAF *)
-  let cfaf = Series.named "CFAF" (Series.add cfbf debt_service) in
+  let cfaf = Formula.named "CFAF" (Formula.add cfbf debt_service) in
 
   [
     ("Base Rent", base_rent);
@@ -236,12 +236,12 @@ let downtown_office : assumptions =
 (* Evaluation and Aggregation *)
 
 (* Build series for one property, then evaluate them all in a single
-   Series.eval_many call so shared subexpressions are computed once. *)
+   Formula.eval_many call so shared subexpressions are computed once. *)
 let eval_property assumptions =
   let series_list = build_property assumptions in
   let labels = List.map fst series_list in
   let series = List.map snd series_list in
-  let values = Series.eval_many tl series in
+  let values = Formula.eval_many tl series in
   List.combine labels values
 
 let sum_arrays a b = Array.init (Array.length a) (fun i -> a.(i) +. b.(i))
@@ -277,7 +277,7 @@ let aggregate_chunk assumptions_chunk =
 
 (* Parallel Evaluation *)
 
-(* Each property is fully independent (its own Series DAG and eval context),
+(* Each property is fully independent (its own Formula DAG and eval context),
    so we partition properties across OS-level domains for parallel evaluation.
    The main domain processes one chunk while other domains handle the rest,
    then partial results are summed element-wise. *)
@@ -319,7 +319,7 @@ let () =
   in
 
   (* Statement.line and Statement.group accept float array directly --
-     no need to wrap pre-evaluated data back into Series.t *)
+     no need to wrap pre-evaluated data back into Formula.t *)
   let portfolio_statement =
     let open Statement in
     group "Portfolio Totals"
@@ -392,6 +392,6 @@ let () =
   let sample_series = build_property downtown_office |> List.map snd in
   let oc = open_out "model.dot" in
   let dot_ppf = Format.formatter_of_out_channel oc in
-  Series.Deps.pp_dot dot_ppf sample_series;
+  Formula.Deps.pp_dot dot_ppf sample_series;
   Format.pp_print_flush dot_ppf ();
   close_out oc

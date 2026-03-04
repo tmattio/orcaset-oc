@@ -11,5 +11,5 @@ module Timeline = Timeline
 module Schedule = Schedule
 module Key = Key
 module Scope = Scope
-module Series = Series
+module Formula = Formula
 module Statement = Statement

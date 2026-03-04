@@ -141,7 +141,7 @@ let daycount_benchmarks =
 let growth_bench n () =
   let start = Date.make 2025 1 1 in
   let tl = Timeline.monthly ~start_date:start ~n in
-  ignore (Series.eval tl (Series.growth_simple ~start_date:start ~rate:0.05 1000.0))
+  ignore (Formula.eval tl (Formula.growth_simple ~start_date:start ~rate:0.05 1000.0))
 
 let growth_benchmarks = sized [ 12; 120; 360 ] growth_bench
 
@@ -150,8 +150,8 @@ let growth_benchmarks = sized [ 12; 120; 360 ] growth_bench
 let compose_bench n_series () =
   let start = Date.make 2025 1 1 in
   let tl = Timeline.monthly ~start_date:start ~n:120 in
-  let series = List.init n_series (fun i -> Series.const (float_of_int (i + 1))) in
-  ignore (Series.eval tl (Series.sum series))
+  let series = List.init n_series (fun i -> Formula.const (float_of_int (i + 1))) in
+  ignore (Formula.eval tl (Formula.sum series))
 
 let compose_benchmarks =
   List.map (fun n -> { name = Printf.sprintf "%d series" n; f = compose_bench n }) [ 2; 5; 10; 20 ]
@@ -161,7 +161,7 @@ let compose_benchmarks =
 let accum_bench n () =
   let start = Date.make 2025 1 1 in
   let tl = Timeline.monthly ~start_date:start ~n in
-  ignore (Series.eval tl (Series.cumsum ~init:0.0 (Series.const 100.0)))
+  ignore (Formula.eval tl (Formula.cumsum ~init:0.0 (Formula.const 100.0)))
 
 let accum_benchmarks = sized [ 12; 120; 360 ] accum_bench
 
@@ -171,13 +171,13 @@ let query_bench () =
   let n = 120 in
   let start = Date.make 2025 1 1 in
   let tl = Timeline.monthly ~start_date:start ~n in
-  let flow = Series.const 100.0 in
-  let balance = Series.cumsum ~init:1000.0 flow in
-  let flow_v = Series.eval tl flow in
-  let balance_v = Series.eval tl balance in
+  let flow = Formula.const 100.0 in
+  let balance = Formula.cumsum ~init:1000.0 flow in
+  let flow_v = Formula.eval tl flow in
+  let balance_v = Formula.eval tl balance in
   for m = 0 to n - 1 do
     let d = Date.add_months start (m + 1) in
-    ignore (Series.Query.balance_at tl ~balance:balance_v ~flow:flow_v d)
+    ignore (Formula.Query.balance_at tl ~balance:balance_v ~flow:flow_v d)
   done
 
 let query_benchmarks = [ { name = "balance_at x120"; f = query_bench } ]
@@ -196,16 +196,16 @@ let loan_bench n () =
   let start = Date.make 2025 1 1 in
   let tl = Timeline.monthly ~start_date:start ~n in
   let pmt = monthly_payment ~amount:loan_amount ~rate:annual_rate ~term:n in
-  let total_pmt = Series.const (-.pmt) in
-  let year_fracs = Series.year_frac Daycount.thirty_360_us in
+  let total_pmt = Formula.const (-.pmt) in
+  let year_fracs = Formula.year_frac Daycount.thirty_360_us in
   let balance, (interest, principal) =
-    Series.feedback ~default:loan_amount (fun prev_bal ->
-        let interest = Series.scale (-.annual_rate) (Series.mul prev_bal year_fracs) in
-        let principal = Series.sub total_pmt interest in
-        let balance = Series.cumsum ~init:loan_amount principal in
+    Formula.feedback ~default:loan_amount (fun prev_bal ->
+        let interest = Formula.scale (-.annual_rate) (Formula.mul prev_bal year_fracs) in
+        let principal = Formula.sub total_pmt interest in
+        let balance = Formula.cumsum ~init:loan_amount principal in
         (balance, (balance, (interest, principal))))
   in
-  ignore (Series.eval_many tl [ balance; interest; principal ])
+  ignore (Formula.eval_many tl [ balance; interest; principal ])
 
 let loan_benchmarks = sized [ 12; 120; 360 ] loan_bench
 
@@ -238,7 +238,7 @@ let proforma_bench =
   fun n () ->
     let start = Date.make 2023 1 1 in
     let tl = Timeline.monthly ~start_date:start ~n in
-    let growing ~rate initial = Series.growth_simple ~start_date:start ~rate initial in
+    let growing ~rate initial = Formula.growth_simple ~start_date:start ~rate initial in
     let base_rent_monthly = building_sf *. base_rent_per_sf_year1 /. 12.0 in
     let parking_monthly = float_of_int parking_spaces *. parking_rate_monthly in
     (* Revenue *)
@@ -255,19 +255,19 @@ let proforma_bench =
     let security = growing ~rate:expense_growth (-.security_monthly) in
     (* Circular: CAM <-> OpEx via feedback *)
     let _cam_recoveries, _gpr, _vacancy, egi, _mgmt, opex_total =
-      Series.feedback ~default:0.0 (fun prev_opex ->
+      Formula.feedback ~default:0.0 (fun prev_opex ->
           let cam_recoveries =
-            Series.map
+            Formula.map
               (fun prev ->
                 if prev = 0.0 then cam_estimate_first else Float.abs prev *. cam_recovery_pct)
               prev_opex
           in
-          let gpr = Series.sum [ base_rent; parking; cam_recoveries; other_income ] in
-          let vacancy = Series.scale (-.vacancy_rate) gpr in
-          let egi = Series.add gpr vacancy in
-          let mgmt = Series.scale (-.management_fee_pct) egi in
+          let gpr = Formula.sum [ base_rent; parking; cam_recoveries; other_income ] in
+          let vacancy = Formula.scale (-.vacancy_rate) gpr in
+          let egi = Formula.add gpr vacancy in
+          let mgmt = Formula.scale (-.management_fee_pct) egi in
           let opex_total =
-            Series.sum
+            Formula.sum
               [
                 property_taxes;
                 insurance;
@@ -281,22 +281,22 @@ let proforma_bench =
           in
           (opex_total, (cam_recoveries, gpr, vacancy, egi, mgmt, opex_total)))
     in
-    let noi = Series.add egi opex_total in
+    let noi = Formula.add egi opex_total in
     (* Debt service *)
     let pmt =
       monthly_payment ~amount:pf_loan_amount ~rate:interest_rate ~term:(loan_term_years * 12)
     in
-    let total_pmt = Series.const (-.pmt) in
-    let year_fracs = Series.year_frac Daycount.actual_360 in
+    let total_pmt = Formula.const (-.pmt) in
+    let year_fracs = Formula.year_frac Daycount.actual_360 in
     let _debt_balance, (debt_interest, debt_principal) =
-      Series.feedback ~default:pf_loan_amount (fun prev_bal ->
-          let interest = Series.scale (-.interest_rate) (Series.mul prev_bal year_fracs) in
-          let principal = Series.sub total_pmt interest in
-          let balance = Series.cumsum ~init:pf_loan_amount principal in
+      Formula.feedback ~default:pf_loan_amount (fun prev_bal ->
+          let interest = Formula.scale (-.interest_rate) (Formula.mul prev_bal year_fracs) in
+          let principal = Formula.sub total_pmt interest in
+          let balance = Formula.cumsum ~init:pf_loan_amount principal in
           (balance, (balance, (interest, principal))))
     in
-    let debt_service = Series.add debt_interest debt_principal in
-    ignore (Series.eval tl (Series.add noi debt_service))
+    let debt_service = Formula.add debt_interest debt_principal in
+    ignore (Formula.eval tl (Formula.add noi debt_service))
 
 let proforma_benchmarks = sized [ 12; 120; 360 ] proforma_bench
 
@@ -305,7 +305,7 @@ let proforma_benchmarks = sized [ 12; 120; 360 ] proforma_bench
 let scale_bench n () =
   let start = Date.make 2025 1 1 in
   let tl = Timeline.monthly ~start_date:start ~n in
-  ignore (Series.eval tl (Series.growth_simple ~start_date:start ~rate:0.05 1000.0))
+  ignore (Formula.eval tl (Formula.growth_simple ~start_date:start ~rate:0.05 1000.0))
 
 let scale_benchmarks = sized [ 12; 120; 360; 1200; 3600 ] scale_bench
 
