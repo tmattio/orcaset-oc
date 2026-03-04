@@ -813,7 +813,21 @@ let test_balance () =
   let flow2 = Flow.of_array [| 10.0; 20.0; 30.0 |] in
   let bal2 = Balance.roll_forward ~init:0.0 flow2 in
   let chg2 = Balance.change bal2 ~default:0.0 in
-  fla "roundtrip change" [| 10.0; 20.0; 30.0 |] (Flow.eval tl3 chg2)
+  fla "roundtrip change" [| 10.0; 20.0; 30.0 |] (Flow.eval tl3 chg2);
+  (* feedback: interest accrual on previous balance *)
+  let balance2, interest =
+    Balance.feedback ~default:100.0 (fun prev_bal ->
+        let interest =
+          Flow.of_formula (Formula.map (fun b -> b *. 0.01) (Balance.formula prev_bal))
+        in
+        let balance = Balance.roll_forward ~init:100.0 interest in
+        (balance, (balance, interest)))
+  in
+  let vb2 = Balance.eval tl3 balance2 in
+  let vi = Flow.eval tl3 interest in
+  fl "fb bal[0]" 101.0 vb2.(0);
+  fl "fb int[0]" 1.0 vi.(0);
+  fl "fb int[1]" 1.01 vi.(1)
 
 (* Integration: coffee shop model *)
 

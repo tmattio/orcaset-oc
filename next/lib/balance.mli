@@ -96,6 +96,37 @@ val change : 'c t -> default:float -> 'c Flow.t
     At period 0, the change is [b.(0) - default]. At period [i > 0],
     the change is [b.(i) - b.(i-1)]. *)
 
+(** {1:feedback Feedback} *)
+
+val feedback :
+  ?name:string ->
+  default:float ->
+  ('c t -> 'c t * 'a) ->
+  'a
+(** [feedback ~default f] ties a self-referential knot for
+    balances. It calls [f] with a balance representing the
+    {e previous period's} value ([default] at period 0). [f]
+    returns [(definition, result)] where [definition] is the
+    balance fed back and [result] is returned to the caller.
+
+    This is the standard pattern for loan amortization:
+
+    {[
+      let balance, (interest, principal) =
+        Balance.feedback ~default:loan_amount (fun prev_bal ->
+            let interest =
+              Flow.of_formula
+                (Formula.scale (-.rate)
+                   (Formula.mul (Balance.formula prev_bal)
+                      (Flow.formula year_fracs)))
+            in
+            let principal = Flow.sub total_pmt interest in
+            let bal =
+              Balance.roll_forward ~init:loan_amount principal
+            in
+            (bal, (interest, principal)))
+    ]} *)
+
 (** {1:escape Escape hatches} *)
 
 val formula : 'c t -> 'c Formula.t

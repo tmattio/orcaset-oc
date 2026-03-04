@@ -45,6 +45,13 @@ let change (B s) ~default =
   let prev_s = Formula.prev s ~default in
   Flow.of_formula (Formula.sub s prev_s)
 
+(* Feedback *)
+
+let feedback ?name ~default f =
+  Formula.feedback ?name ~default (fun prev_formula ->
+    let (B def), exposed = f (B prev_formula) in
+    (def, exposed))
+
 (* Escape hatches *)
 
 let formula (B s) = s
