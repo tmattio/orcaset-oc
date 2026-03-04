@@ -12,32 +12,25 @@ type 'a item =
 type 'c series =
   | Flow : 'c Flow.t -> 'c series
   | Balance : 'c Balance.t -> 'c series
-  | Formula : 'c Formula.t -> 'c series
 
 let line label data = Line { label; data }
 let group ?total label items = Group { label; items; total }
 
 let flow f = Flow f
 let balance b = Balance b
-let formula f = Formula f
 
 let to_formula : type c. c series -> c Formula.t = function
   | Flow f -> Flow.unsafe_to_formula f
   | Balance b -> Balance.unsafe_to_formula b
-  | Formula f -> f
 
 let flow_line label f = Line { label; data = Flow f }
 let balance_line label b = Line { label; data = Balance b }
-let formula_line label f = Line { label; data = Formula f }
 
 let flow_group ?total label items =
   group ?total:(Option.map (fun t -> Flow t) total) label items
 
 let balance_group ?total label items =
   group ?total:(Option.map (fun t -> Balance t) total) label items
-
-let formula_group ?total label items =
-  group ?total:(Option.map (fun t -> Formula t) total) label items
 
 (* Traversal *)
 
@@ -72,7 +65,7 @@ let lines item =
 (* Classify direct children to determine whether auto-summing is safe.
    Mixed flow/balance groups skip auto-total since the sum would be
    semantically meaningless. *)
-type kind = All_flows | All_balances | All_formulas | Mixed
+type kind = All_flows | All_balances | Mixed
 
 let classify_children items =
   let tags =
@@ -89,14 +82,12 @@ let classify_children items =
       let tag = function
         | Flow _ -> `F
         | Balance _ -> `B
-        | Formula _ -> `R
       in
       let t = tag first in
       if List.for_all (fun s -> tag s = t) rest then
         match t with
         | `F -> All_flows
         | `B -> All_balances
-        | `R -> All_formulas
       else Mixed
 
 let direct_data_formula = function
@@ -135,16 +126,6 @@ let eval tl item =
   let results = Formula.eval_many tl all_series in
   let pairs = List.combine all_series results in
   map (fun s -> List.assq s pairs) item
-
-let eval_materialized tl item =
-  let item = auto_total item in
-  let all_series = collect_series item in
-  let results = Formula.eval_many tl all_series in
-  let pairs = List.combine all_series results in
-  map (fun s ->
-    let vs = List.assq s pairs in
-    Formula.Materialized.make tl vs
-  ) item
 
 (* Pretty-printing *)
 

@@ -10,9 +10,9 @@
     statements, etc.).
 
     Leaf nodes ({!Line}) carry a label and a datum. Interior nodes ({!Group}) carry a label, a list
-    of children, and an optional total. When the total is omitted, {!auto_total} (called implicitly
-    by {!eval}) synthesizes one by summing the direct children — but only when all children are the
-    same kind (all flows, all balances, or all formulas). Mixed groups skip auto-total.
+    of children, and an optional total. When the total is omitted, {!eval} synthesizes one by
+    summing the direct children — but only when all children are the same kind (all flows or all
+    balances). Mixed groups skip auto-total.
 
     {1 Building}
 
@@ -32,7 +32,6 @@
     {1 Evaluating}
 
     Use {!eval} to materialize a [series item] into a [float array item] against a {!Timeline.t}.
-    All formulas in the tree share a single memoization context via {!Formula.eval_many}.
 
     {1 Traversing}
 
@@ -52,19 +51,12 @@ type 'a item =
 type 'c series =
   | Flow : 'c Flow.t -> 'c series
   | Balance : 'c Balance.t -> 'c series
-  | Formula : 'c Formula.t -> 'c series
 
 val flow : 'c Flow.t -> 'c series
 (** [flow f] is [Flow f]. *)
 
 val balance : 'c Balance.t -> 'c series
 (** [balance b] is [Balance b]. *)
-
-val formula : 'c Formula.t -> 'c series
-(** [formula f] is [Formula f]. *)
-
-val to_formula : 'c series -> 'c Formula.t
-(** [to_formula s] extracts the underlying {!Formula.t} from [s]. *)
 
 (** {1:constructors Constructors} *)
 
@@ -74,18 +66,15 @@ val line : string -> 'a -> 'a item
 val group : ?total:'a -> string -> 'a item list -> 'a item
 (** [group ?total label items] is [Group {label; items; total}].
 
-    When [total] is omitted, {!eval} and {!auto_total} will synthesize one by summing the direct
-    children's data — but only when all children are the same kind. Mixed children (flows and
-    balances together) skip auto-total. Supply an explicit [total] to override this. *)
+    When [total] is omitted, {!eval} will synthesize one by summing the direct children's data —
+    but only when all children are the same kind. Mixed children (flows and balances together) skip
+    auto-total. Supply an explicit [total] to override this. *)
 
 val flow_line : string -> 'c Flow.t -> 'c series item
 (** [flow_line label f] is [line label (Flow f)]. *)
 
 val balance_line : string -> 'c Balance.t -> 'c series item
 (** [balance_line label b] is [line label (Balance b)]. *)
-
-val formula_line : string -> 'c Formula.t -> 'c series item
-(** [formula_line label f] is [line label (Formula f)]. *)
 
 val flow_group : ?total:'c Flow.t -> string -> 'c series item list -> 'c series item
 (** [flow_group ?total label items] is [group ?total:(Option.map flow total) label items]. *)
@@ -94,11 +83,6 @@ val balance_group :
   ?total:'c Balance.t -> string -> 'c series item list -> 'c series item
 (** [balance_group ?total label items] is
     [group ?total:(Option.map balance total) label items]. *)
-
-val formula_group :
-  ?total:'c Formula.t -> string -> 'c series item list -> 'c series item
-(** [formula_group ?total label items] is
-    [group ?total:(Option.map formula total) label items]. *)
 
 (** {1:traversal Traversal} *)
 
@@ -131,30 +115,12 @@ val lines : 'a item -> (string * 'a) list
 
 (** {1:evaluation Evaluation} *)
 
-val auto_total : 'c series item -> 'c Formula.t item
-(** [auto_total item] converts series to formulas and fills in missing group totals. For each
-    {!Group} without an explicit total whose children are all the same kind (all flows, all
-    balances, or all formulas), synthesizes a total by summing the children. Groups with mixed
-    children skip auto-total. Groups that already have a total are unchanged. Operates recursively,
-    bottom-up.
-
-    {!eval} calls this automatically before materializing. Call [auto_total] directly only to
-    inspect the formula tree prior to evaluation. *)
-
 val eval : Timeline.t -> 'c series item -> float array item
-(** [eval tl item] materializes every formula in [item] against [tl].
+(** [eval tl item] materializes every series in [item] against [tl].
 
-    Applies {!auto_total} first, then evaluates all formulas in a single shared memoization context
-    via {!Formula.eval_many}. The result is a structurally identical tree with [float array] data.
-
-    Raises [Formula.Cycle_error] if a same-period cycle is detected. *)
-
-val eval_materialized : Timeline.t -> 'c series item -> 'c Formula.Materialized.t item
-(** [eval_materialized tl item] is like {!eval} but returns {!Formula.Materialized.t} values that
-    keep period bindings attached to each result array. Applies {!auto_total} first and shares a
-    single memoization context.
-
-    Raises [Formula.Cycle_error] if a same-period cycle is detected. *)
+    Fills in missing group totals by summing direct children (when all are the same kind), then
+    evaluates all formulas in a single shared memoization context. The result is a structurally
+    identical tree with [float array] data. *)
 
 (** {1:pp Pretty-printing} *)
 

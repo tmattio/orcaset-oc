@@ -9,7 +9,7 @@ type balance_hint =
   | BH_observations of { sorted_obs : (Date.t * float) array; before_first : float }
   | BH_roll_forward of {
       init : float;
-      flow_eval : Timeline.t -> Flow.Materialized.query_ctx * float array;
+      flow_eval : Timeline.t -> Flow.Materialized_internal.query_ctx * float array;
     }
   | BH_add of balance_hint * balance_hint
   | BH_sub of balance_hint * balance_hint
@@ -85,7 +85,7 @@ let roll_forward ?name ~init flow =
   let formula = Formula.cumsum ?name ~init (Flow.unsafe_to_formula flow) in
   let flow_eval tl =
     let m = Flow.eval tl flow in
-    (Flow.Materialized.query m, Flow.Materialized.unsafe_values m)
+    (Flow.Materialized_internal.query m, Flow.Materialized_internal.unsafe_values m)
   in
   { formula; hint = BH_roll_forward { init; flow_eval } }
 
@@ -214,7 +214,7 @@ module Materialized = struct
         init : float;
         balance_values : float array;
         flow_values : float array;
-        flow_query : Flow.Materialized.query_ctx;
+        flow_query : Flow.Materialized_internal.query_ctx;
         timeline : Timeline.t;
       }
     | BQ_add of balance_query * balance_query
@@ -225,8 +225,6 @@ module Materialized = struct
     | BQ_map2 of (float -> float -> float) * balance_query * balance_query
     | BQ_mul of balance_query * balance_query
     | BQ_cell_based
-
-  type interp = Step | Series
 
   type 'c t = {
     timeline : Timeline.t;
@@ -301,7 +299,7 @@ module Materialized = struct
             let p = Timeline.get timeline i in
             let flow_to_date =
               match
-                Flow.Materialized.accrue_via_ctx flow_query
+                Flow.Materialized_internal.accrue_via_ctx flow_query
                   ~start_date:(Period.start_date p) ~end_date:date
               with
               | v -> v
@@ -332,32 +330,33 @@ module Materialized = struct
         at_query ?split_fn q1 date *. at_query ?split_fn q2 date
     | BQ_cell_based -> raise_notrace Exit
 
-  let at ?(interp = Series) ?split_fn m date =
-    let tl = m.timeline in
-    match interp with
-    | Step -> Formula.Query.interpolate ?split_fn tl m.values date
-    | Series -> (
-        match at_query ?split_fn m.query date with
-        | v -> v
-        | exception Exit -> (
-            (* Fallback: current period value *)
-            match Timeline.find_index tl date with
-            | None ->
-                invalid_arg
-                  (Printf.sprintf
-                     "Balance.Materialized.at: date %s is outside the timeline"
-                     (Date.to_string date))
-            | Some i -> m.values.(i)))
+  let at ?split_fn m date =
+    match at_query ?split_fn m.query date with
+    | v -> v
+    | exception Exit -> (
+        (* Fallback: current period value *)
+        match Timeline.find_index m.timeline date with
+        | None ->
+            invalid_arg
+              (Printf.sprintf
+                 "Balance.Materialized.at: date %s is outside the timeline"
+                 (Date.to_string date))
+        | Some i -> m.values.(i))
 end
 
 (* Dependency graph *)
 
 module Deps = struct
-  type node = Formula.Deps.node
-  type edge = Formula.Deps.edge
+  type node = Flow.Deps.node = { id : int; name : string option; kind : string }
+  type edge = Flow.Deps.edge = { src : int; dst : int }
 
   let graph ?named_only balances =
-    Formula.Deps.graph ?named_only (List.map (fun b -> b.formula) balances)
+    let formulas = List.map (fun b -> b.formula) balances in
+    let nodes, edges = Formula.Deps.graph ?named_only formulas in
+    ( List.map (fun (n : Formula.Deps.node) ->
+          { id = n.id; name = n.name; kind = n.kind }) nodes,
+      List.map (fun (e : Formula.Deps.edge) ->
+          { src = e.src; dst = e.dst }) edges )
 
   let pp_dot ?named_only ppf balances =
     Formula.Deps.pp_dot ?named_only ppf (List.map (fun b -> b.formula) balances)

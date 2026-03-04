@@ -249,11 +249,30 @@ module Materialized = struct
           ~end_date
 end
 
+(* Internal re-exports for cross-module use *)
+
+module Materialized_internal = struct
+  type query_ctx = Materialized.query_ctx =
+    | Q_events of (Date.t * float) list
+    | Q_source_periods of {
+        pairs : (Period.t * float) list;
+        split_fn : Formula.Query.split_fn;
+      }
+    | Q_sum of query_ctx list
+    | Q_scale of float * query_ctx
+    | Q_neg of query_ctx
+    | Q_cell_based
+
+  let accrue_via_ctx = Materialized.accrue_via_ctx
+  let query = Materialized.query
+  let unsafe_values = Materialized.unsafe_values
+end
+
 (* Dependency graph *)
 
 module Deps = struct
-  type node = Formula.Deps.node
-  type edge = Formula.Deps.edge
+  type node = Formula.Deps.node = { id : int; name : string option; kind : string }
+  type edge = Formula.Deps.edge = { src : int; dst : int }
 
   let graph ?named_only flows =
     Formula.Deps.graph ?named_only (List.map (fun f -> f.formula) flows)

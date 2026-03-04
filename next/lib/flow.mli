@@ -25,9 +25,16 @@
 type 'c t
 (** The type for flows tagged with currency or unit ['c]. *)
 
-type split_fn = Formula.Query.split_fn
+type split_fn =
+  start_date:Date.t ->
+  end_date:Date.t ->
+  split_date:Date.t ->
+  value:float ->
+  float * float
 (** The type for functions that split a period's value at a date.
-    See {!Formula.Query.split_fn}. *)
+    Given the period's [start_date], [end_date], and a [split_date]
+    within the period, returns [(before, after)] where
+    [before +. after = value]. *)
 
 val default_split_fn : split_fn
 (** [default_split_fn] distributes the value proportionally by day
@@ -182,22 +189,6 @@ val where : cond:'a t -> then_:'c t -> else_:'c t -> 'c t
     [cond.(i) <> 0.0] and [else_] otherwise. Only the selected
     branch is evaluated at each period. *)
 
-(** {1:cross_period Cross-period} *)
-
-val prev : ?name:string -> 'c t -> default:float -> 'c t
-(** [prev f ~default] produces [default] at period 0 and
-    [f.(i-1)] at period [i > 0]. *)
-
-val scan :
-  ?name:string ->
-  init:float ->
-  (acc:float -> x:float -> float) ->
-  'c t ->
-  'c t
-(** [scan ~init f flow] produces a running accumulation:
-    - Period 0: [f ~acc:init ~x:flow.(0)]
-    - Period i: [f ~acc:result.(i-1) ~x:flow.(i)] *)
-
 (** {1:feedback Feedback} *)
 
 val feedback :
@@ -235,78 +226,21 @@ val convert : rate:float -> 'c1 t -> 'c2 t
 (** [convert ~rate f] scales [f] by [rate] and changes the
     currency tag. *)
 
-(** {1:unsafe Unsafe escape hatches}
-
-    These operations drop to the untyped {!Formula.t} layer.
-    Prefer the safe API above for new code. *)
-
-val unsafe_to_formula : 'c t -> 'c Formula.t
-(** [unsafe_to_formula f] is the underlying {!Formula.t}. *)
-
-val unsafe_of_formula : 'c Formula.t -> 'c t
-(** [unsafe_of_formula s] wraps [s] as a flow. The caller asserts
-    that [s] has flow semantics (interval quantities). *)
-
-val unsafe_of_array : ?name:string -> float array -> 'c t
-(** [unsafe_of_array arr] is a flow that produces [arr.(i)] at
-    period [i]. Periods beyond [Array.length arr] produce [0.0].
-    The array is captured by reference and must not be mutated
-    after the call.
-
-    Prefer {!init} or {!of_events} for new code. *)
-
 (** {1:eval Evaluation} *)
 
-(** {2:materialized Materialized results}
-
-    Evaluation results that keep period bindings attached,
+(** Materialized results that keep period bindings attached,
     preventing accidental misalignment between values and their
     periods. *)
-
 module Materialized : sig
-  (** {2 Query context}
-
-      Internal types for provenance-aware queries. Used by
-      {!Balance.Materialized} to provide intrinsic interpolation. *)
-
-  type query_ctx =
-    | Q_events of (Date.t * float) list
-    | Q_source_periods of {
-        pairs : (Period.t * float) list;
-        split_fn : Formula.Query.split_fn;
-      }
-    | Q_sum of query_ctx list
-    | Q_scale of float * query_ctx
-    | Q_neg of query_ctx
-    | Q_cell_based
-
-  val accrue_via_ctx :
-    query_ctx -> start_date:Date.t -> end_date:Date.t -> float
-  (** [accrue_via_ctx ctx ~start_date ~end_date] accrues using
-      provenance context. Raises [Exit] if [ctx] is [Q_cell_based]. *)
-
   type 'c t
   (** The type for materialized flow results. Each value is bound
       to its period. *)
-
-  val query : _ t -> query_ctx
-  (** [query m] is the provenance context of [m]. *)
-
-  val make : Timeline.t -> float array -> 'c t
-  (** [make tl values] binds [values] to the periods of [tl].
-
-      Raises [Invalid_argument] if
-      [Array.length values <> Timeline.length tl]. *)
 
   val timeline : _ t -> Timeline.t
   (** [timeline m] is the timeline [m] was evaluated against. *)
 
   val to_array : _ t -> float array
   (** [to_array m] is a fresh copy of the values array. *)
-
-  val unsafe_values : _ t -> float array
-  (** [unsafe_values m] is the backing values array. The caller
-      must not mutate it. *)
 
   val length : _ t -> int
   (** [length m] is the number of values. *)
@@ -328,7 +262,7 @@ module Materialized : sig
       pair. *)
 
   val accrue :
-    ?split_fn:Formula.Query.split_fn ->
+    ?split_fn:split_fn ->
     _ t ->
     start_date:Date.t ->
     end_date:Date.t ->
@@ -342,15 +276,16 @@ module Materialized : sig
       When provenance is unavailable (cell-local combinators), falls
       back to [split_fn] (default: pro-rata by day count). Returns
       [0.0] if the date range does not overlap the timeline. *)
+
+  (**/**)
+
+  val make : Timeline.t -> float array -> 'c t
+  val unsafe_values : _ t -> float array
 end
 
 val eval : Timeline.t -> 'c t -> 'c Materialized.t
 (** [eval tl f] materializes [f] against [tl], returning a
     {!Materialized.t} with period bindings attached. *)
-
-val eval_values : Timeline.t -> 'c t -> float array
-(** [eval_values tl f] materializes [f] against [tl] as a raw
-    [float array]. Prefer {!eval}. *)
 
 val eval_many : Timeline.t -> 'c t list -> 'c Materialized.t list
 (** [eval_many tl fs] materializes each flow in [fs] against [tl],
@@ -361,10 +296,10 @@ val eval_many : Timeline.t -> 'c t list -> 'c Materialized.t list
 (** {1:deps Dependency graph} *)
 
 module Deps : sig
-  type node = Formula.Deps.node
+  type node = { id : int; name : string option; kind : string }
   (** A node in the dependency graph. *)
 
-  type edge = Formula.Deps.edge
+  type edge = { src : int; dst : int }
   (** A directed edge from a dependency to a consumer. *)
 
   val graph : ?named_only:bool -> _ t list -> node list * edge list
@@ -399,4 +334,40 @@ module Syntax : sig
 
   val ( *$ ) : float -> 'c t -> 'c t
   (** [k *$ f] is {!scale}[ k f]. *)
+end
+
+(**/**)
+
+(** Internal: used by {!Balance} for cross-module provenance. *)
+
+val unsafe_to_formula : 'c t -> 'c Formula.t
+val unsafe_of_formula : 'c Formula.t -> 'c t
+val unsafe_of_array : ?name:string -> float array -> 'c t
+val eval_values : Timeline.t -> 'c t -> float array
+
+val prev : ?name:string -> 'c t -> default:float -> 'c t
+val scan :
+  ?name:string ->
+  init:float ->
+  (acc:float -> x:float -> float) ->
+  'c t ->
+  'c t
+
+module Materialized_internal : sig
+  type query_ctx =
+    | Q_events of (Date.t * float) list
+    | Q_source_periods of {
+        pairs : (Period.t * float) list;
+        split_fn : Formula.Query.split_fn;
+      }
+    | Q_sum of query_ctx list
+    | Q_scale of float * query_ctx
+    | Q_neg of query_ctx
+    | Q_cell_based
+
+  val accrue_via_ctx :
+    query_ctx -> start_date:Date.t -> end_date:Date.t -> float
+
+  val query : _ Materialized.t -> query_ctx
+  val unsafe_values : _ Materialized.t -> float array
 end

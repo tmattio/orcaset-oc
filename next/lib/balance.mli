@@ -23,9 +23,6 @@ type 'c t
 val const : ?name:string -> float -> 'c t
 (** [const v] is a balance that produces [v] at every period. *)
 
-val init : ?name:string -> (Period.t -> float) -> 'c t
-(** [init f] is a balance that produces [f period] at each period. *)
-
 val of_dates :
   ?name:string ->
   ?before_first:float ->
@@ -58,15 +55,6 @@ val roll_forward : ?name:string -> init:float -> 'c Flow.t -> 'c t
     This is the fundamental flow-to-balance bridge. The companion
     flow is stored intrinsically and used by {!Materialized.at} for
     provenance-aware interpolation. *)
-
-val roll_forward_with :
-  ?name:string ->
-  init:float ->
-  (acc:float -> x:float -> float) ->
-  'c Flow.t ->
-  'c t
-(** [roll_forward_with ~init f flow] is like {!roll_forward} but
-    uses [f ~acc ~x] instead of addition. *)
 
 (** {1:naming Naming} *)
 
@@ -123,14 +111,10 @@ val where : cond:'a Flow.t -> then_:'c t -> else_:'c t -> 'c t
 
 (** {1:cross_period Cross-period} *)
 
-val prev : ?name:string -> 'c t -> default:float -> 'c t
-(** [prev b ~default] produces [default] at period 0 and
-    [b.(i-1)] at period [i > 0]. *)
-
 val at_period_start : ?name:string -> 'c t -> default:float -> 'c t
-(** [at_period_start b ~default] is {!prev}[ b ~default]. The
-    balance at the start of a period is the end-of-previous-period
-    value. *)
+(** [at_period_start b ~default] produces [default] at period 0 and
+    [b.(i-1)] at period [i > 0]. The balance at the start of a
+    period is the end-of-previous-period value. *)
 
 val at_period_end : 'c t -> 'c t
 (** [at_period_end b] is [b] (identity). A balance naturally
@@ -184,85 +168,27 @@ val feedback :
             (bal, (interest, principal)))
     ]} *)
 
-val fixpoint :
-  ?name:string ->
-  ?tol:float ->
-  ?max_iter:int ->
-  guess:float ->
-  ('c t -> 'c t) ->
-  'c t
-(** [fixpoint ~guess f] finds the value [x] at each period such
-    that [f (const x)] converges to [x] (within [tol]).
-
-    Use this for same-period circular dependencies where the
-    balance depends on itself within the same period (e.g. LTC
-    construction loans where interest capitalizes into the
-    balance).
-
-    [tol] defaults to [1e-10]. [max_iter] defaults to [100].
-
-    Raises [Formula.Convergence_error] if [max_iter] iterations
-    are exhausted. *)
-
 (** {1:convert Currency conversion} *)
 
 val convert : rate:float -> 'c1 t -> 'c2 t
 (** [convert ~rate b] scales [b] by [rate] and changes the
     currency tag. *)
 
-(** {1:unsafe Unsafe escape hatches}
-
-    These operations drop to the untyped {!Formula.t} layer.
-    Prefer the safe API above for new code. *)
-
-val unsafe_to_formula : 'c t -> 'c Formula.t
-(** [unsafe_to_formula b] is the underlying {!Formula.t}. *)
-
-val unsafe_of_formula : 'c Formula.t -> 'c t
-(** [unsafe_of_formula s] wraps [s] as a balance. The caller
-    asserts that [s] has balance semantics (point-in-time
-    quantities). *)
-
-val unsafe_of_array : ?name:string -> float array -> 'c t
-(** [unsafe_of_array arr] is a balance that produces [arr.(i)]
-    at period [i]. Periods beyond [Array.length arr] produce
-    [0.0].
-
-    Prefer {!init} or {!roll_forward} for new code. *)
-
 (** {1:eval Evaluation} *)
 
-(** {2:materialized Materialized results}
-
-    Evaluation results that keep period bindings attached,
+(** Materialized results that keep period bindings attached,
     preventing accidental misalignment between values and their
     periods. *)
-
 module Materialized : sig
   type 'c t
   (** The type for materialized balance results. Each value is
       bound to its period. *)
-
-  type interp =
-    | Step    (** End-of-previous-period balance. *)
-    | Series  (** Prior balance + pro-rated current-period flow. *)
-  (** The type for point-in-time interpolation methods. *)
-
-  val make : Timeline.t -> float array -> 'c t
-  (** [make tl values] binds [values] to the periods of [tl].
-
-      Raises [Invalid_argument] if
-      [Array.length values <> Timeline.length tl]. *)
 
   val timeline : _ t -> Timeline.t
   (** [timeline m] is the timeline [m] was evaluated against. *)
 
   val to_array : _ t -> float array
   (** [to_array m] is a fresh copy of the values array. *)
-
-  val unsafe_values : _ t -> float array
-  (** [unsafe_values m] is the backing values array. The caller
-      must not mutate it. *)
 
   val length : _ t -> int
   (** [length m] is the number of values. *)
@@ -284,27 +210,26 @@ module Materialized : sig
       pair. *)
 
   val at :
-    ?interp:interp ->
-    ?split_fn:Formula.Query.split_fn ->
+    ?split_fn:Flow.split_fn ->
     _ t ->
     Date.t ->
     float
   (** [at m date] is the interpolated balance at [date].
 
-      When [interp] is [Series] (the default) and the balance was
-      created with {!val:roll_forward}, computes the prior period's
-      ending balance plus the accrued portion of the companion flow
-      up to [date], using the flow's query provenance when available.
+      When provenance is available (from {!val:roll_forward},
+      {!val:of_dates}, or composed via {!val:add}, {!val:sub}, etc.),
+      computes the exact value using intrinsic semantics.
 
-      When [interp] is [Step], returns the pro-rated value of the
-      enclosing period (ignoring companion flow).
-
-      For balances without a companion flow (e.g. {!val:of_dates},
-      {!val:const}), both modes fall back to period-level
-      interpolation.
+      When provenance is unavailable (cell-local combinators), falls
+      back to the current period's end-of-period value.
 
       Raises [Invalid_argument] if [date] is outside the
       timeline. *)
+
+  (**/**)
+
+  val make : Timeline.t -> float array -> 'c t
+  val unsafe_values : _ t -> float array
 end
 
 (** {1:deps Dependency graph} *)
@@ -331,6 +256,24 @@ val eval : Timeline.t -> 'c t -> 'c Materialized.t
     balance was created with {!roll_forward}, the companion flow
     is co-evaluated for provenance-aware {!Materialized.at}. *)
 
+(**/**)
+
+val unsafe_to_formula : 'c t -> 'c Formula.t
+val unsafe_of_formula : 'c Formula.t -> 'c t
+val unsafe_of_array : ?name:string -> float array -> 'c t
+val init : ?name:string -> (Period.t -> float) -> 'c t
+val prev : ?name:string -> 'c t -> default:float -> 'c t
+val roll_forward_with :
+  ?name:string ->
+  init:float ->
+  (acc:float -> x:float -> float) ->
+  'c Flow.t ->
+  'c t
 val eval_values : Timeline.t -> 'c t -> float array
-(** [eval_values tl b] materializes [b] against [tl] as a raw
-    [float array]. Expert use; prefer {!eval}. *)
+val fixpoint :
+  ?name:string ->
+  ?tol:float ->
+  ?max_iter:int ->
+  guess:float ->
+  ('c t -> 'c t) ->
+  'c t
