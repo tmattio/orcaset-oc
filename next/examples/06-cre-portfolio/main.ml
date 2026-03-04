@@ -4,13 +4,16 @@
     model (revenue, opex, capex, debt) evaluated against a shared timeline. Aggregation is
     parallelized across CPU cores with [Domain.spawn].
 
-    Each property's series are evaluated independently via [Formula.eval_many], then the resulting
+    Each property's formulas are evaluated independently via [Formula.eval_many], then the resulting
     [float array] values are summed across properties. The final portfolio totals are assembled into
     a [Statement] built from raw [float array] data rather than [Formula.t] values -- showing that
     [Statement.group], [Statement.line], and [Statement.pp] work with pre-evaluated arrays.
 
-    Demonstrates: Formula.eval_many, Statement.line, Statement.group, Statement.layout, Statement.pp,
-    Domain.spawn, parallel aggregation. *)
+    Internally, [build_property] uses [Flow.t] and [Balance.t] for typed construction, then extracts
+    the underlying [Formula.t] via [Flow.formula] and [Balance.formula] for uniform evaluation.
+
+    Demonstrates: Flow.t, Balance.t, Balance.feedback, Formula.eval_many, Statement.line,
+    Statement.group, Statement.layout, Statement.pp, Domain.spawn, parallel aggregation. *)
 
 open Orcaset2
 
@@ -60,12 +63,12 @@ type assumptions = {
   leasing_commission_pct : float;
 }
 
-(* Build all line items for a single property as (label, Formula.t) pairs.
-   Returns unevaluated series -- the caller passes them to Formula.eval_many
-   to materialize the values against a timeline. *)
+(* Build all line items for a single property. Uses [Flow.t] and [Balance.t]
+   internally for typed construction, then extracts [Formula.t] at the return
+   boundary for uniform evaluation via [Formula.eval_many]. *)
 let build_property (a : assumptions) =
   let annual_growth ~name ~initial ~rate =
-    Formula.init ~name (fun _i p ->
+    Flow.init ~name (fun p ->
         let sd = Period.start_date p in
         initial *. (1.0 +. (rate *. Daycount.actual_360 start_date sd)))
   in
@@ -106,17 +109,23 @@ let build_property (a : assumptions) =
   let cam_recoveries, gpr, vacancy_loss, egi, management, opex_total =
     Formula.feedback ~default:0.0 (fun prev_opex ->
         let cam_recoveries =
-          Formula.map ~name:"CAM Recoveries"
-            (fun prev ->
-              if prev = 0.0 then a.cam_estimate_first else Float.abs prev *. a.cam_recovery_pct)
-            prev_opex
+          Flow.of_formula
+            (Formula.map ~name:"CAM Recoveries"
+               (fun prev ->
+                 if prev = 0.0 then a.cam_estimate_first else Float.abs prev *. a.cam_recovery_pct)
+               prev_opex)
         in
-        let gpr = Formula.sum ~name:"GPR" [ base_rent; parking; cam_recoveries; other_income ] in
-        let vacancy_loss = Formula.named "Vacancy Loss" (Formula.scale (-.a.vacancy_rate) gpr) in
-        let egi = Formula.named "EGI" (Formula.add gpr vacancy_loss) in
-        let management = Formula.map ~name:"Management" (fun e -> -.e *. a.management_fee_pct) egi in
+        let gpr = Flow.sum ~name:"GPR" [ base_rent; parking; cam_recoveries; other_income ] in
+        let vacancy_loss = Flow.named "Vacancy Loss" (Flow.scale (-.a.vacancy_rate) gpr) in
+        let egi = Flow.named "EGI" (Flow.add gpr vacancy_loss) in
+        let management =
+          Flow.of_formula
+            (Formula.map ~name:"Management"
+               (fun e -> -.e *. a.management_fee_pct)
+               (Flow.formula egi))
+        in
         let opex_total =
-          Formula.sum ~name:"Total OpEx"
+          Flow.sum ~name:"Total OpEx"
             [
               property_taxes;
               insurance;
@@ -128,24 +137,31 @@ let build_property (a : assumptions) =
               security;
             ]
         in
-        (opex_total, (cam_recoveries, gpr, vacancy_loss, egi, management, opex_total)))
+        (Flow.formula opex_total,
+         (cam_recoveries, gpr, vacancy_loss, egi, management, opex_total)))
   in
 
   (* NOI *)
-  let noi = Formula.named "NOI" (Formula.add egi opex_total) in
+  let noi = Flow.named "NOI" (Flow.add egi opex_total) in
 
   (* CapEx *)
-  let capital_reserves = Formula.map ~name:"Capital Reserves" (fun e -> -.e *. a.reserve_pct) egi in
+  let capital_reserves =
+    Flow.of_formula
+      (Formula.map ~name:"Capital Reserves" (fun e -> -.e *. a.reserve_pct) (Flow.formula egi))
+  in
   let ti =
-    Formula.const ~name:"Tenant Improvements" (-.(a.ti_per_sf_annual *. a.building_sf /. 12.0))
+    Flow.const ~name:"Tenant Improvements" (-.(a.ti_per_sf_annual *. a.building_sf /. 12.0))
   in
   let leasing_commissions =
-    Formula.map ~name:"Leasing Commissions" (fun e -> -.e *. a.leasing_commission_pct) egi
+    Flow.of_formula
+      (Formula.map ~name:"Leasing Commissions"
+         (fun e -> -.e *. a.leasing_commission_pct)
+         (Flow.formula egi))
   in
-  let capex_total = Formula.sum ~name:"Total CapEx" [ capital_reserves; ti; leasing_commissions ] in
+  let capex_total = Flow.sum ~name:"Total CapEx" [ capital_reserves; ti; leasing_commissions ] in
 
   (* CFBF *)
-  let cfbf = Formula.named "CFBF" (Formula.add noi capex_total) in
+  let cfbf = Flow.named "CFBF" (Flow.add noi capex_total) in
 
   let monthly_payment =
     let r = a.interest_rate /. 12.0 in
@@ -153,53 +169,55 @@ let build_property (a : assumptions) =
     let f = (1.0 +. r) ** n in
     loan_amount *. (r *. f) /. (f -. 1.0)
   in
-  let year_fracs =
-    Formula.init ~name:"Year Fracs" (fun _i p ->
-        Daycount.actual_360 (Period.start_date p) (Period.end_date p))
-  in
-  let total_pmt = Formula.const ~name:"Debt Payment" (-.monthly_payment) in
+  let year_fracs = Flow.year_frac ~name:"Year Fracs" Daycount.actual_360 in
+  let total_pmt = Flow.const ~name:"Debt Payment" (-.monthly_payment) in
   let _balance, (interest, principal) =
-    Formula.feedback ~name:"Loan Balance" ~default:loan_amount (fun prev_bal ->
+    Balance.feedback ~name:"Loan Balance" ~default:loan_amount (fun prev_bal ->
         let interest =
-          Formula.named "Interest"
-            (Formula.map2 (fun bal yf -> -.bal *. a.interest_rate *. yf) prev_bal year_fracs)
+          Flow.of_formula
+            (Formula.named "Interest"
+               (Formula.map2
+                  (fun bal yf -> -.bal *. a.interest_rate *. yf)
+                  (Balance.formula prev_bal) (Flow.formula year_fracs)))
         in
-        let principal = Formula.named "Principal" (Formula.sub total_pmt interest) in
-        let balance = Formula.cumsum ~init:loan_amount principal in
+        let principal = Flow.named "Principal" (Flow.sub total_pmt interest) in
+        let balance = Balance.roll_forward ~init:loan_amount principal in
         (balance, (balance, (interest, principal))))
   in
-  let debt_service = Formula.named "Debt Service" (Formula.add interest principal) in
+  let debt_service = Flow.named "Debt Service" (Flow.add interest principal) in
 
   (* CFAF *)
-  let cfaf = Formula.named "CFAF" (Formula.add cfbf debt_service) in
+  let cfaf = Flow.named "CFAF" (Flow.add cfbf debt_service) in
 
+  (* Extract Formula.t for uniform eval_many *)
+  let f = Flow.formula in
   [
-    ("Base Rent", base_rent);
-    ("Parking Income", parking);
-    ("CAM Recoveries", cam_recoveries);
-    ("Other Income", other_income);
-    ("GPR", gpr);
-    ("Vacancy & Credit Loss", vacancy_loss);
-    ("EGI", egi);
-    ("Property Taxes", property_taxes);
-    ("Insurance", insurance);
-    ("Utilities", utilities);
-    ("Repairs & Maintenance", repairs);
-    ("Property Management", management);
-    ("Janitorial", janitorial);
-    ("Landscaping", landscaping);
-    ("Security", security);
-    ("Total OpEx", opex_total);
-    ("NOI", noi);
-    ("Capital Reserves", capital_reserves);
-    ("Tenant Improvements", ti);
-    ("Leasing Commissions", leasing_commissions);
-    ("Total CapEx", capex_total);
-    ("CFBF", cfbf);
-    ("Interest Expense", interest);
-    ("Principal Payment", principal);
-    ("Total Debt Service", debt_service);
-    ("CFAF", cfaf);
+    ("Base Rent", f base_rent);
+    ("Parking Income", f parking);
+    ("CAM Recoveries", f cam_recoveries);
+    ("Other Income", f other_income);
+    ("GPR", f gpr);
+    ("Vacancy & Credit Loss", f vacancy_loss);
+    ("EGI", f egi);
+    ("Property Taxes", f property_taxes);
+    ("Insurance", f insurance);
+    ("Utilities", f utilities);
+    ("Repairs & Maintenance", f repairs);
+    ("Property Management", f management);
+    ("Janitorial", f janitorial);
+    ("Landscaping", f landscaping);
+    ("Security", f security);
+    ("Total OpEx", f opex_total);
+    ("NOI", f noi);
+    ("Capital Reserves", f capital_reserves);
+    ("Tenant Improvements", f ti);
+    ("Leasing Commissions", f leasing_commissions);
+    ("Total CapEx", f capex_total);
+    ("CFBF", f cfbf);
+    ("Interest Expense", f interest);
+    ("Principal Payment", f principal);
+    ("Total Debt Service", f debt_service);
+    ("CFAF", f cfaf);
   ]
 
 (* Default Property Assumptions *)

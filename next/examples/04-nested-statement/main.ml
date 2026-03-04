@@ -16,8 +16,9 @@
     Group totals are synthesized automatically by [Statement.auto_total] (called implicitly by
     [Statement.eval]) -- no explicit totals needed.
 
-    Demonstrates: [Formula.init], [Formula.scan], [Formula.scale], [Statement.group] (auto_total),
-    [Statement.eval], [Statement.pp], [Statement.lines]. *)
+    Demonstrates: [Flow.t] for all line items, [Formula.init] and [Formula.scan] via escape hatch,
+    [Flow.scale], [Statement.flow_line], [Statement.group] (auto_total), [Statement.eval],
+    [Statement.pp], [Statement.lines]. *)
 
 open Orcaset2
 
@@ -42,16 +43,17 @@ let tl = Timeline.monthly ~start_date ~n:12
 (* Revenue *)
 
 let recurring_revenue =
-  Formula.growth_simple ~name:"Recurring Revenue" ~start_date ~rate:recurring_growth recurring_first
+  Flow.growth_simple ~name:"Recurring Revenue" ~start_date ~rate:recurring_growth recurring_first
 
 (* Non-recurring revenue: random walk with drift and volatility.
    Formula.scan accumulates over a shock series -- each period's value
-   depends on the previous period's output, drift, and a random shock. *)
+   depends on the previous period's output, drift, and a random shock.
+   We use Formula-level operations and wrap back into Flow. *)
 let rng = Random.State.make [| seed |]
 
 (* Approximate normal shocks via sum of 12 uniforms (central limit theorem). *)
 let shocks =
-  Formula.init ~name:"Shocks" (fun _i _p ->
+  Flow.init ~name:"Shocks" (fun _p ->
       let sum_uniforms =
         List.init 12 (fun _ -> Random.State.float rng 1.0) |> List.fold_left ( +. ) 0.0
       in
@@ -59,21 +61,22 @@ let shocks =
 
 (* scan ~init feeds the previous output back as ~acc, building a running walk. *)
 let non_recurring_revenue =
-  Formula.scan ~name:"Non-Recurring Revenue" ~init:non_recurring_first
-    (fun ~acc ~x -> acc +. non_recurring_drift +. x)
-    shocks
+  Flow.of_formula
+    (Formula.scan ~name:"Non-Recurring Revenue" ~init:non_recurring_first
+       (fun ~acc ~x -> acc +. non_recurring_drift +. x)
+       (Flow.formula shocks))
 
 (* Cost of Revenue *)
 
 let recurring_cost =
-  Formula.named "Recurring Cost" (Formula.scale recurring_cost_pct recurring_revenue)
+  Flow.named "Recurring Cost" (Flow.scale recurring_cost_pct recurring_revenue)
 
 let non_recurring_cost =
-  Formula.named "Non-Recurring Cost" (Formula.scale non_recurring_cost_pct non_recurring_revenue)
+  Flow.named "Non-Recurring Cost" (Flow.scale non_recurring_cost_pct non_recurring_revenue)
 
 (* Admin Expenses *)
 
-let admin = Formula.growth_simple ~name:"Admin" ~start_date ~rate:admin_rate admin_first
+let admin = Flow.growth_simple ~name:"Admin" ~start_date ~rate:admin_rate admin_first
 
 (* Statement *)
 
@@ -87,11 +90,14 @@ let income_statement =
       group "Gross Profit"
         [
           group "Revenue"
-            [ line "Recurring" recurring_revenue; line "Non-Recurring" non_recurring_revenue ];
+            [
+              flow_line "Recurring" recurring_revenue;
+              flow_line "Non-Recurring" non_recurring_revenue;
+            ];
           group "Cost of Revenue"
-            [ line "Recurring" recurring_cost; line "Non-Recurring" non_recurring_cost ];
+            [ flow_line "Recurring" recurring_cost; flow_line "Non-Recurring" non_recurring_cost ];
         ];
-      line "Admin Expenses" admin;
+      flow_line "Admin Expenses" admin;
     ]
 
 (* Output *)
@@ -137,6 +143,12 @@ let () =
   let oc = open_out "model.dot" in
   let dot_ppf = Format.formatter_of_out_channel oc in
   Formula.Deps.pp_dot dot_ppf
-    [ recurring_revenue; non_recurring_revenue; recurring_cost; non_recurring_cost; admin ];
+    [
+      Flow.formula recurring_revenue;
+      Flow.formula non_recurring_revenue;
+      Flow.formula recurring_cost;
+      Flow.formula non_recurring_cost;
+      Flow.formula admin;
+    ];
   Format.pp_print_flush dot_ppf ();
   close_out oc

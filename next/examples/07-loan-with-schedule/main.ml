@@ -6,10 +6,10 @@
 
     Key patterns:
     - {!Schedule.make} with roll and BDC conventions
-    - Loan amortization on the schedule's own timeline
+    - [Balance.feedback] for loan amortization on the schedule's own timeline
     - Interest accrual from unadjusted periods
     - Quarterly payments bridged to the monthly model via {!Schedule.to_events} +
-      {!Formula.of_events} *)
+      {!Flow.of_events} *)
 
 open Orcaset2
 
@@ -50,46 +50,50 @@ let quarterly_payment =
    from the contractual coupon date to the next, regardless of weekend shifts. *)
 let accrual_yf =
   let unadj_periods = Schedule.unadjusted_periods loan_sched in
-  Formula.init ~name:"Year Fracs" (fun i _p ->
-      let up = unadj_periods.(i) in
-      Daycount.actual_360 (Period.start_date up) (Period.end_date up))
+  Flow.of_formula
+    (Formula.init ~name:"Year Fracs" (fun i _p ->
+         let up = unadj_periods.(i) in
+         Daycount.actual_360 (Period.start_date up) (Period.end_date up)))
 
-let total_pmt = Formula.const ~name:"Quarterly Payment" (-.quarterly_payment)
+let total_pmt = Flow.const ~name:"Quarterly Payment" (-.quarterly_payment)
 
 let loan_balance, (interest_pmt, principal_pmt) =
-  Formula.feedback ~name:"Loan Balance" ~default:loan_amount (fun prev_bal ->
+  Balance.feedback ~name:"Loan Balance" ~default:loan_amount (fun prev_bal ->
       let interest =
-        Formula.named "Interest" (Formula.scale (-.annual_rate) (Formula.mul prev_bal accrual_yf))
+        Flow.of_formula
+          (Formula.named "Interest"
+             (Formula.scale (-.annual_rate)
+                (Formula.mul (Balance.formula prev_bal) (Flow.formula accrual_yf))))
       in
-      let principal = Formula.named "Principal" (Formula.sub total_pmt interest) in
-      let balance = Formula.cumsum ~init:loan_amount principal in
+      let principal = Flow.named "Principal" (Flow.sub total_pmt interest) in
+      let balance = Balance.roll_forward ~init:loan_amount principal in
       (balance, (balance, (interest, principal))))
 
 (* Bridge quarterly loan events into the monthly model. *)
 
-let bridge_to_monthly name series =
-  let vals = Formula.eval loan_tl series in
-  Formula.of_events ~name (Schedule.to_events (fun i _p -> vals.(i)) loan_sched)
+let bridge_to_monthly name flow =
+  let vals = Flow.eval loan_tl flow in
+  Flow.of_events ~name (Schedule.to_events (fun i _p -> vals.(i)) loan_sched)
 
 let monthly_interest = bridge_to_monthly "Loan Interest" interest_pmt
 let monthly_principal = bridge_to_monthly "Loan Principal" principal_pmt
 
 let monthly_debt_service =
-  Formula.named "Debt Service" (Formula.add monthly_interest monthly_principal)
+  Flow.named "Debt Service" (Flow.add monthly_interest monthly_principal)
 
 (* Operating Model *)
 
 let revenue =
-  Formula.growth_simple ~name:"Revenue" ~start_date:model_start ~rate:0.08
+  Flow.growth_simple ~name:"Revenue" ~start_date:model_start ~rate:0.08
     ~daycount:Daycount.calendar_monthly 500_000.0
 
 let opex =
-  Formula.growth_simple ~name:"Operating Expenses" ~start_date:model_start ~rate:0.03
+  Flow.growth_simple ~name:"Operating Expenses" ~start_date:model_start ~rate:0.03
     ~daycount:Daycount.calendar_monthly (-200_000.0)
 
-let noi = Formula.named "NOI" (Formula.add revenue opex)
-let cfaf = Formula.named "CFAF" (Formula.add noi monthly_debt_service)
-let cash = Formula.cumsum ~name:"Cash Balance" ~init:2_000_000.0 cfaf
+let noi = Flow.named "NOI" (Flow.add revenue opex)
+let cfaf = Flow.named "CFAF" (Flow.add noi monthly_debt_service)
+let cash = Balance.roll_forward ~name:"Cash Balance" ~init:2_000_000.0 cfaf
 
 (* Output *)
 
@@ -128,9 +132,9 @@ let () =
   (* Loan amortization on loan timeline *)
   Printf.printf "LOAN AMORTIZATION (first 8 quarters)\n";
   Printf.printf "=====================================\n";
-  let bal_v = Formula.eval loan_tl loan_balance in
-  let int_v = Formula.eval loan_tl interest_pmt in
-  let pri_v = Formula.eval loan_tl principal_pmt in
+  let bal_v = Balance.eval loan_tl loan_balance in
+  let int_v = Flow.eval loan_tl interest_pmt in
+  let pri_v = Flow.eval loan_tl principal_pmt in
   Printf.printf "%3s  %12s  %14s  %12s  %12s  %14s\n" "Q" "Pay Date" "Beg Balance" "Interest"
     "Principal" "End Balance";
   Printf.printf "%s\n" (String.make 75 '-');
@@ -154,13 +158,13 @@ let () =
     let open Statement in
     group "Monthly Cash Flow"
       [
-        line "Revenue" revenue;
-        line "Operating Expenses" opex;
-        line "NOI" noi;
-        group ~total:monthly_debt_service "Debt Service"
-          [ line "Interest" monthly_interest; line "Principal" monthly_principal ];
-        line "CFAF" cfaf;
-        line "Cash Balance" cash;
+        flow_line "Revenue" revenue;
+        flow_line "Operating Expenses" opex;
+        flow_line "NOI" noi;
+        group ~total:(Flow.formula monthly_debt_service) "Debt Service"
+          [ flow_line "Interest" monthly_interest; flow_line "Principal" monthly_principal ];
+        flow_line "CFAF" cfaf;
+        balance_line "Cash Balance" cash;
       ]
   in
   let results = Statement.eval model_tl model_statement in
@@ -175,6 +179,6 @@ let () =
   (* Dependency graph *)
   let oc = open_out "model.dot" in
   let ppf = Format.formatter_of_out_channel oc in
-  Formula.Deps.pp_dot ppf [ cfaf; cash ];
+  Formula.Deps.pp_dot ppf [ Flow.formula cfaf; Balance.formula cash ];
   Format.pp_print_flush ppf ();
   close_out oc

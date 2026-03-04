@@ -1,8 +1,13 @@
 (** Three-Statement Financial Model
 
-    Income Statement, Cash Flow Statement, and Balance Sheet linked together. Key patterns: breaking
-    circular dependencies with [Formula.delay] + [Formula.prev], running balances with
-    [Formula.cumsum], and hierarchical output with [Statement]. *)
+    Income Statement, Cash Flow Statement, and Balance Sheet linked together.
+
+    Key patterns demonstrated:
+    - [Flow.t] for all income and cash flow line items (revenue, expenses, net income).
+    - [Balance.t] for all balance sheet items (cash, PPE, equity).
+    - [Balance.feedback] for the PPE/depreciation circular dependency.
+    - [Balance.roll_forward] to accumulate flows into balances (cash, retained earnings).
+    - [Statement.flow_line] and [Statement.balance_line] for typed statement construction. *)
 
 open Orcaset2
 
@@ -27,50 +32,54 @@ let tl = Timeline.monthly ~start_date ~n:12
 (* Income Statement *)
 
 let revenue =
-  Formula.growth_simple ~name:"Revenue" ~start_date ~rate:revenue_growth_rate initial_revenue
+  Flow.growth_simple ~name:"Revenue" ~start_date ~rate:revenue_growth_rate initial_revenue
 
-let cogs = Formula.named "COGS" (Formula.scale (-.cogs_pct) revenue)
-let gross_profit = Formula.named "Gross Profit" (Formula.add revenue cogs)
-let opex = Formula.const ~name:"OpEx" (-.opex_monthly)
-let capex = Formula.named "CapEx" (Formula.scale (-.capex_pct) revenue)
+let cogs = Flow.named "COGS" (Flow.scale (-.cogs_pct) revenue)
+let gross_profit = Flow.named "Gross Profit" (Flow.add revenue cogs)
+let opex = Flow.const ~name:"OpEx" (-.opex_monthly)
+let capex = Flow.named "CapEx" (Flow.scale (-.capex_pct) revenue)
 
 (* Circular dependency: depreciation depends on PPE net, PPE net depends on
-   depreciation. [feedback] breaks the cycle: the function receives the prior
-   period's PPE net, and returns the current period's definition. *)
+   depreciation. [Balance.feedback] breaks the cycle: the function receives the
+   prior period's PPE net (a balance), and returns the current period's
+   definition. *)
 let ppe_net, depreciation =
-  Formula.feedback ~default:initial_ppe (fun prev_ppe ->
+  Balance.feedback ~default:initial_ppe (fun prev_ppe ->
       let depreciation =
-        Formula.map ~name:"Depreciation" (fun ppe -> -.(ppe *. depreciation_rate /. 12.0)) prev_ppe
+        Flow.of_formula
+          (Formula.map ~name:"Depreciation"
+             (fun ppe -> -.(ppe *. depreciation_rate /. 12.0))
+             (Balance.formula prev_ppe))
       in
-      let ppe_change = Formula.named "PPE Change" (Formula.add (Formula.neg capex) depreciation) in
-      let ppe_net = Formula.cumsum ~name:"PPE Net" ~init:initial_ppe ppe_change in
+      let ppe_change = Flow.named "PPE Change" (Flow.add (Flow.neg capex) depreciation) in
+      let ppe_net = Balance.roll_forward ~name:"PPE Net" ~init:initial_ppe ppe_change in
       (ppe_net, (ppe_net, depreciation)))
 
-let ebt = Formula.named "EBT" (Formula.sum [ gross_profit; opex; depreciation ])
-let tax = Formula.named "Tax" (Formula.scale (-.tax_rate) ebt)
-let net_income = Formula.named "Net Income" (Formula.add ebt tax)
+let ebt = Flow.named "EBT" (Flow.sum [ gross_profit; opex; depreciation ])
+let tax = Flow.named "Tax" (Flow.scale (-.tax_rate) ebt)
+let net_income = Flow.named "Net Income" (Flow.add ebt tax)
 
 (* Cash Flow Statement *)
 
 (* Depreciation is a non-cash charge: add it back to get operating cash flow *)
 let cf_net_income = net_income
-let cf_depreciation_addback = Formula.named "Depreciation Add-back" (Formula.neg depreciation)
-let cf_ops = Formula.named "CF Operations" (Formula.add cf_net_income cf_depreciation_addback)
+let cf_depreciation_addback = Flow.named "Depreciation Add-back" (Flow.neg depreciation)
+let cf_ops = Flow.named "CF Operations" (Flow.add cf_net_income cf_depreciation_addback)
 let cf_invest = capex
-let cf_finance = Formula.const ~name:"CF Financing" 0.0
-let net_cash_change = Formula.named "Net Cash Change" (Formula.sum [ cf_ops; cf_invest; cf_finance ])
+let cf_finance = Flow.const ~name:"CF Financing" 0.0
+let net_cash_change = Flow.named "Net Cash Change" (Flow.sum [ cf_ops; cf_invest; cf_finance ])
 
 (* Balance Sheet *)
 
-let cash = Formula.cumsum ~name:"Cash" ~init:initial_cash net_cash_change
-let total_assets = Formula.named "Total Assets" (Formula.add cash ppe_net)
-let common_stock = Formula.const ~name:"Common Stock" common_stock_amount
+let cash = Balance.roll_forward ~name:"Cash" ~init:initial_cash net_cash_change
+let total_assets = Balance.named "Total Assets" (Balance.add cash ppe_net)
+let common_stock = Balance.const ~name:"Common Stock" common_stock_amount
 
 (* Derived so the balance sheet balances at t=0: assets - equity = retained earnings *)
 let initial_re = initial_cash +. initial_ppe -. common_stock_amount
-let retained_earnings = Formula.cumsum ~name:"Retained Earnings" ~init:initial_re net_income
-let total_liabilities_equity = Formula.named "Total L&E" (Formula.add common_stock retained_earnings)
-let balance_check = Formula.named "Balance Check" (Formula.sub total_assets total_liabilities_equity)
+let retained_earnings = Balance.roll_forward ~name:"Retained Earnings" ~init:initial_re net_income
+let total_liabilities_equity = Balance.named "Total L&E" (Balance.add common_stock retained_earnings)
+let balance_check = Balance.named "Balance Check" (Balance.sub total_assets total_liabilities_equity)
 
 (* Statements *)
 
@@ -80,21 +89,22 @@ let financial_statement =
     [
       group "Income Statement"
         [
-          group "Gross Profit" [ line "Revenue" revenue; line "COGS" cogs ];
-          line "Opex" opex;
-          line "Depreciation" depreciation;
-          line "Tax" tax;
-          line "Net Income" net_income;
+          group "Gross Profit" [ flow_line "Revenue" revenue; flow_line "COGS" cogs ];
+          flow_line "Opex" opex;
+          flow_line "Depreciation" depreciation;
+          flow_line "Tax" tax;
+          flow_line "Net Income" net_income;
         ];
       group "Cash Flow Statement"
         [
           group "Operations"
             [
-              line "Net Income" cf_net_income; line "Depreciation Add Back" cf_depreciation_addback;
+              flow_line "Net Income" cf_net_income;
+              flow_line "Depreciation Add Back" cf_depreciation_addback;
             ];
-          group "Investing" [ line "Capex" cf_invest ];
-          line "CF Financing" cf_finance;
-          line "Net Cash Change" net_cash_change;
+          group "Investing" [ flow_line "Capex" cf_invest ];
+          flow_line "CF Financing" cf_finance;
+          flow_line "Net Cash Change" net_cash_change;
         ];
     ]
 
@@ -102,10 +112,13 @@ let balance_sheet_statement =
   let open Statement in
   group "Balance Sheet"
     [
-      group "Assets" [ line "Cash" cash; line "PPE Net" ppe_net ];
+      group "Assets" [ balance_line "Cash" cash; balance_line "PPE Net" ppe_net ];
       group "Liabilities & Equity"
-        [ line "Common Stock" common_stock; line "Retained Earnings" retained_earnings ];
-      group "Check" [ line "Balance Check" balance_check ];
+        [
+          balance_line "Common Stock" common_stock;
+          balance_line "Retained Earnings" retained_earnings;
+        ];
+      group "Check" [ balance_line "Balance Check" balance_check ];
     ]
 
 (* Output *)
@@ -136,6 +149,6 @@ let () =
   (* Dependency graph *)
   let oc = open_out "model.dot" in
   let dot_ppf = Format.formatter_of_out_channel oc in
-  Formula.Deps.pp_dot dot_ppf [ balance_check ];
+  Formula.Deps.pp_dot dot_ppf [ Balance.formula balance_check ];
   Format.pp_print_flush dot_ppf ();
   close_out oc
