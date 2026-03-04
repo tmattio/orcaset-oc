@@ -63,5 +63,8 @@ module Scope : module type of Scope
 module Formula : module type of Formula
 (** Declarative computations over a timeline. *)
 
+module Flow : module type of Flow
+(** Interval quantities (revenue, expenses, cash movements). *)
+
 module Statement : module type of Statement
 (** Hierarchical statement structure for financial reports. *)

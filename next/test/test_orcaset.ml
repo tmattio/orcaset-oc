@@ -741,6 +741,36 @@ let test_schedule () =
       Schedule.make ~start_date:(date 2025 1 1) ~end_date:(date 2025 7 1)
         ~offset:(Period.make_offset ()) ())
 
+(* Flow *)
+
+let test_flow () =
+  let evf msg tl f exp = fla msg exp (Flow.eval tl f) in
+  evf "const" tl3 (Flow.const 42.0) [| 42.0; 42.0; 42.0 |];
+  evf "of_array" tl3 (Flow.of_array [| 1.0; 2.0 |]) [| 1.0; 2.0; 0.0 |];
+  evf "init" tl3
+    (Flow.init (fun p -> Period.days p |> float_of_int))
+    [| 31.0; 28.0; 31.0 |];
+  evf "of_events" tl3
+    (Flow.of_events [ (date 2025 1 10, 100.0); (date 2025 3 5, 200.0) ])
+    [| 100.0; 0.0; 200.0 |];
+  (* exact algebra *)
+  let a = Flow.of_array [| 10.0; 20.0; 30.0 |] in
+  let b = Flow.of_array [| 1.0; 2.0; 3.0 |] in
+  evf "add" tl3 (Flow.add a b) [| 11.0; 22.0; 33.0 |];
+  evf "sub" tl3 (Flow.sub a b) [| 9.0; 18.0; 27.0 |];
+  evf "scale" tl3 (Flow.scale 2.0 a) [| 20.0; 40.0; 60.0 |];
+  evf "neg" tl3 (Flow.neg a) [| -10.0; -20.0; -30.0 |];
+  evf "sum" tl3 (Flow.sum [ a; b; Flow.const 100.0 ]) [| 111.0; 122.0; 133.0 |];
+  (* escape hatch roundtrip *)
+  let f = Flow.of_formula (Flow.formula a) in
+  evf "roundtrip" tl3 f [| 10.0; 20.0; 30.0 |];
+  (* named *)
+  let _ = Flow.named "Revenue" a in
+  (* eval_materialized *)
+  let m = Flow.eval_materialized tl3 a in
+  check int "mat length" 3 (Formula.Materialized.length m);
+  fl "mat get 0" 10.0 (Formula.Materialized.get m 0)
+
 (* Integration: coffee shop model *)
 
 let test_coffee_shop () =
@@ -832,6 +862,7 @@ let () =
       ("Materialized", [ test_case "materialized" `Quick test_materialized ]);
       ("Statement", [ test_case "statement" `Quick test_statement ]);
       ("Deps", [ test_case "deps" `Quick test_deps ]);
+      ("Flow", [ test_case "flow" `Quick test_flow ]);
       ("Key", [ test_case "key" `Quick test_key ]);
       ("Scope", [ test_case "scope" `Quick test_scope ]);
       ("Integration", [ test_case "coffee shop" `Quick test_coffee_shop ]);
