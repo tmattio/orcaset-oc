@@ -60,6 +60,7 @@ module Key : module type of Key
 module Scope : module type of Scope
 (** Model-level registries for line-item definitions. *)
 
+(* CR: do we need to expose formula globally? can it be an internal module so we avoid exposing API that we don't want the user to use? *)
 module Formula : module type of Formula
 (** Declarative computations over a timeline. *)
 

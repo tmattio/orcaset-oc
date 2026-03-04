@@ -3,28 +3,57 @@
    SPDX-License-Identifier: SSPL-1.0
   ---------------------------------------------------------------------------*)
 
-type 'a t = { mutable entries : (Key.t * 'a) list; mutable sealed : bool }
+type binding = Binding : 'a Key.t * 'a -> binding
+type t = { mutable entries : binding list; mutable sealed : bool; parent : t option }
 
-let create () = { entries = []; sealed = false }
+let create () = { entries = []; sealed = false; parent = None }
+let create_child parent = { entries = []; sealed = false; parent = Some parent }
 
-let define scope key value =
+let has_local_key (type a) scope (key : a Key.t) =
+  List.exists (fun (Binding (k, _)) -> Key.equal k key) scope.entries
+
+let define (type a) scope (key : a Key.t) (value : a) =
   if scope.sealed then
-    invalid_arg
-      (Printf.sprintf "Scope.define: scope is sealed, cannot define %s" (Key.name key));
-  if List.exists (fun (k, _) -> Key.equal k key) scope.entries then
+    invalid_arg (Printf.sprintf "Scope.define: scope is sealed, cannot define %s" (Key.name key));
+  if has_local_key scope key then
     invalid_arg (Printf.sprintf "Scope.define: duplicate key %s" (Key.name key));
-  scope.entries <- (key, value) :: scope.entries
+  scope.entries <- Binding (key, value) :: scope.entries
 
 let seal scope = scope.sealed <- true
 
-let find scope key =
-  match List.find_opt (fun (k, _) -> Key.equal k key) scope.entries with
-  | Some (_, v) -> v
-  | None -> invalid_arg (Printf.sprintf "Scope.find: key %s not found" (Key.name key))
+let find_in_entries : type a. binding list -> a Key.t -> a option =
+ fun entries key ->
+  let uid_key : a Type.Id.t = Key.uid key in
+  let rec loop = function
+    | [] -> None
+    | Binding (k, v) :: rest ->
+        match Type.Id.provably_equal (Key.uid k) uid_key with
+        | Some Type.Equal -> Some (v : a)
+        | None -> loop rest
+  in
+  loop entries
 
-let find_opt scope key =
-  Option.map snd (List.find_opt (fun (k, _) -> Key.equal k key) scope.entries)
+let rec find : type a. t -> a Key.t -> a =
+ fun scope key ->
+  match find_in_entries scope.entries key with
+  | Some v -> v
+  | None -> (
+      match scope.parent with
+      | Some p -> find p key
+      | None -> invalid_arg (Printf.sprintf "Scope.find: key %s not found" (Key.name key)))
 
-let entries scope = List.rev scope.entries
-let keys scope = List.rev_map fst scope.entries
+let rec find_opt : type a. t -> a Key.t -> a option =
+ fun scope key ->
+  match find_in_entries scope.entries key with
+  | Some _ as r -> r
+  | None -> (
+      match scope.parent with
+      | Some p -> find_opt p key
+      | None -> None)
+
+let mem scope key = Option.is_some (find_opt scope key)
+let mem_local scope key = has_local_key scope key
+
+let keys scope = List.rev_map (fun (Binding (k, _)) -> Key.pack k) scope.entries
+let size scope = List.length scope.entries
 let is_sealed scope = scope.sealed

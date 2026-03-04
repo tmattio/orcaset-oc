@@ -903,9 +903,9 @@ let test_key () =
 (* Scope *)
 
 let test_scope () =
-  let k1 = Key.make "A" in
-  let k2 = Key.make "B" in
-  let k3 = Key.make "C" in
+  let k1 : int Key.t = Key.make "A" in
+  let k2 : int Key.t = Key.make "B" in
+  let k3 : int Key.t = Key.make "C" in
   let s = Scope.create () in
   check bool "unsealed" false (Scope.is_sealed s);
   Scope.define s k1 1;
@@ -913,7 +913,7 @@ let test_scope () =
   check int "find k1" 1 (Scope.find s k1);
   check int "find k2" 2 (Scope.find s k2);
   check (option int) "find_opt k3" None (Scope.find_opt s k3);
-  check int "entries len" 2 (List.length (Scope.entries s));
+  check int "size" 2 (Scope.size s);
   check int "keys len" 2 (List.length (Scope.keys s));
   (* duplicate *)
   invalid "Scope.define: duplicate key A" (fun () -> Scope.define s k1 99);
@@ -924,7 +924,35 @@ let test_scope () =
   (* find still works after seal *)
   check int "find after seal" 1 (Scope.find s k1);
   (* missing key *)
-  invalid "Scope.find: key C not found" (fun () -> ignore (Scope.find s k3))
+  invalid "Scope.find: key C not found" (fun () -> ignore (Scope.find s k3));
+  (* heterogeneous: mix int and string in same scope *)
+  let ki : int Key.t = Key.make "Int" in
+  let ks : string Key.t = Key.make "Str" in
+  let h = Scope.create () in
+  Scope.define h ki 42;
+  Scope.define h ks "hello";
+  check int "het int" 42 (Scope.find h ki);
+  check string "het string" "hello" (Scope.find h ks);
+  (* parent scope *)
+  let parent = Scope.create () in
+  let kp : float Key.t = Key.make "Rate" in
+  Scope.define parent kp 0.065;
+  Scope.seal parent;
+  let child = Scope.create_child parent in
+  let kc : int Key.t = Key.make "Term" in
+  Scope.define child kc 360;
+  fl "parent lookup" 0.065 (Scope.find child kp);
+  check int "child lookup" 360 (Scope.find child kc);
+  check bool "mem parent key" true (Scope.mem child kp);
+  check bool "mem_local parent key" false (Scope.mem_local child kp);
+  check bool "mem_local child key" true (Scope.mem_local child kc);
+  (* shadow parent *)
+  let shadow = Scope.create_child parent in
+  let kp2 : float Key.t = Key.make "Rate" in
+  Scope.define shadow kp 0.05;
+  fl "shadow" 0.05 (Scope.find shadow kp);
+  fl "parent unchanged" 0.065 (Scope.find parent kp);
+  ignore kp2
 
 (* Run *)
 

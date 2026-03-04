@@ -3,49 +3,73 @@
    SPDX-License-Identifier: SSPL-1.0
   ---------------------------------------------------------------------------*)
 
-(** Model-level registries for line-item definitions.
+(** Typed heterogeneous model registries.
 
-    A scope is a mutable-then-sealed registry that maps {!Key.t} values to definitions. Definitions
-    are registered with {!define} and the scope is frozen with {!seal}. After sealing, no new
-    definitions can be added. This catches duplicate and late definitions eagerly.
+    A scope is a mutable-then-sealed registry mapping typed {!Key.t} values to values of the
+    corresponding type. A single scope can hold values of different types simultaneously — flows,
+    balances, formulas, or any user-defined type.
 
     {[
+      let revenue_key : [`USD] Flow.t Key.t    = Key.make "Revenue"
+      let cash_key    : [`USD] Balance.t Key.t = Key.make "Cash"
+
       let scope = Scope.create () in
-      Scope.define scope revenue_key revenue_series;
-      Scope.define scope cogs_key cogs_series;
+      Scope.define scope revenue_key revenue_flow;
+      Scope.define scope cash_key    cash_balance;
       Scope.seal scope;
-      let rev = Scope.find scope revenue_key
+
+      let rev  : [`USD] Flow.t    = Scope.find scope revenue_key
+      let cash : [`USD] Balance.t = Scope.find scope cash_key
     ]}
 
-    {1 Scopes} *)
+    {1:scopes Scopes} *)
 
-type 'a t
-(** The type for scopes mapping {!Key.t} to ['a]. *)
+type t
+(** The type for heterogeneous scopes. *)
 
-val create : unit -> 'a t
-(** [create ()] is a fresh, unsealed scope. *)
+val create : unit -> t
+(** [create ()] is a fresh, unsealed, parentless scope. *)
 
-val define : 'a t -> Key.t -> 'a -> unit
-(** [define scope key value] registers [value] under [key].
+val create_child : t -> t
+(** [create_child parent] is a fresh scope whose lookups fall through to [parent] when a key is not
+    found locally. Shadowing a parent key is permitted. *)
 
-    @raise Invalid_argument if [scope] is sealed or [key] is already defined. *)
+(** {1:mutation Mutation} *)
 
-val seal : 'a t -> unit
+val define : t -> 'a Key.t -> 'a -> unit
+(** [define scope key value] registers [value] under [key] in this scope.
+
+    Raises [Invalid_argument] if [scope] is sealed or [key] is already defined in this scope. *)
+
+val seal : t -> unit
 (** [seal scope] freezes [scope]. Subsequent calls to {!define} raise. *)
 
-val find : 'a t -> Key.t -> 'a
-(** [find scope key] is the value registered under [key].
+(** {1:lookup Lookup} *)
 
-    @raise Invalid_argument if [key] is not defined. *)
+val find : t -> 'a Key.t -> 'a
+(** [find scope key] is the value registered under [key]. Searches this scope first, then the
+    parent chain.
 
-val find_opt : 'a t -> Key.t -> 'a option
-(** [find_opt scope key] is [Some v] if [key] is defined, [None] otherwise. *)
+    Raises [Invalid_argument] if [key] is not defined anywhere in the chain. *)
 
-val entries : 'a t -> (Key.t * 'a) list
-(** [entries scope] is the list of [(key, value)] pairs in definition order. *)
+val find_opt : t -> 'a Key.t -> 'a option
+(** [find_opt scope key] is [Some v] if [key] is defined, [None] otherwise. Searches the parent
+    chain. *)
 
-val keys : 'a t -> Key.t list
-(** [keys scope] is the list of keys in definition order. *)
+val mem : t -> 'a Key.t -> bool
+(** [mem scope key] is [true] if [key] is defined in this scope or any ancestor. *)
 
-val is_sealed : 'a t -> bool
+val mem_local : t -> 'a Key.t -> bool
+(** [mem_local scope key] is [true] only if [key] is defined in this scope, not in a parent. *)
+
+(** {1:meta Metadata} *)
+
+val is_sealed : t -> bool
 (** [is_sealed scope] is [true] after {!seal} has been called. *)
+
+val keys : t -> Key.packed list
+(** [keys scope] is the list of type-erased keys defined in this scope, in definition order. Does
+    not include parent keys. *)
+
+val size : t -> int
+(** [size scope] is the number of entries defined in this scope (not counting parent entries). *)
