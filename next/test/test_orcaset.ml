@@ -11,7 +11,7 @@ let fla msg exp act =
   check int (msg ^ " length") (Array.length exp) (Array.length act);
   Array.iteri (fun i e -> fl (Printf.sprintf "%s[%d]" msg i) e act.(i)) exp
 
-let ev msg tl s exp = fla msg exp (Formula.eval tl s)
+let ev msg tl s exp = fla msg exp (Flow.Materialized.to_array (Flow.eval tl s))
 let ds msg exp d = check string msg exp (Date.to_string d)
 let raises msg exn f = check_raises msg exn (fun () -> ignore (f ()))
 let invalid msg f = raises msg (Invalid_argument msg) f
@@ -210,147 +210,146 @@ let test_daycount () =
   let yf = Daycount.calendar_monthly (date 2025 1 1) (date 2025 7 1) in
   fl "cm neg" (-.yf) (Daycount.calendar_monthly (date 2025 7 1) (date 2025 1 1))
 
-(* Formula: constructors *)
+(* Flow: constructors *)
 
-let test_formula_constructors () =
-  ev "const" tl3 (Formula.const 42.0) [| 42.0; 42.0; 42.0 |];
-  ev "of_array" tl3 (Formula.of_array [| 1.0; 2.0 |]) [| 1.0; 2.0; 0.0 |];
-  ev "init" tl3 (Formula.init (fun i _p -> float_of_int (i + 1))) [| 1.0; 2.0; 3.0 |];
+let test_flow_constructors () =
+  ev "const" tl3 (Flow.const 42.0) [| 42.0; 42.0; 42.0 |];
+  ev "of_array" tl3 (Flow.unsafe_of_array [| 1.0; 2.0 |]) [| 1.0; 2.0; 0.0 |];
+  ev "init_indexed" tl3 (Flow.init_indexed (fun i _p -> float_of_int (i + 1))) [| 1.0; 2.0; 3.0 |];
   ev "init days" tl3
-    (Formula.init (fun _i p -> Period.days p |> float_of_int))
+    (Flow.init_indexed (fun _i p -> Period.days p |> float_of_int))
     [| 31.0; 28.0; 31.0 |];
-  ev "init_flow" tl3
-    (Formula.init_flow (fun p -> Period.days p |> float_of_int))
+  ev "init" tl3
+    (Flow.init (fun p -> Period.days p |> float_of_int))
     [| 31.0; 28.0; 31.0 |];
-  ev "init_tl" tl3
-    (Formula.init_tl (fun tl _i _p -> float_of_int (Timeline.length tl)))
-    [| 3.0; 3.0; 3.0 |];
   (* of_events: aggregation, boundary placement, outside-timeline drop *)
   ev "of_events" tl3
-    (Formula.of_events [ (date 2025 1 10, 100.0); (date 2025 1 20, 50.0); (date 2025 3 5, 200.0) ])
+    (Flow.of_events [ (date 2025 1 10, 100.0); (date 2025 1 20, 50.0); (date 2025 3 5, 200.0) ])
     [| 150.0; 0.0; 200.0 |];
-  ev "boundary" tl3 (Formula.of_events [ (date 2025 2 1, 100.0) ]) [| 0.0; 100.0; 0.0 |];
+  ev "boundary" tl3 (Flow.of_events [ (date 2025 2 1, 100.0) ]) [| 0.0; 100.0; 0.0 |];
   invalid "Formula.of_events: event date 2024-01-01 is outside the timeline"
-    (fun () -> ignore (Formula.eval tl3
-      (Formula.of_events [ (date 2024 1 1, 999.0); (date 2025 1 15, 100.0) ])));
+    (fun () -> ignore (Flow.Materialized.to_array (Flow.eval tl3
+      (Flow.of_events [ (date 2024 1 1, 999.0); (date 2025 1 15, 100.0) ]))));
   (* of_events: evaluated against a timeline that contains all events *)
   let tl_long = Timeline.monthly ~start_date:(date 2025 1 1) ~n:6 in
   ev "cross-tl long" tl_long
-    (Formula.of_events [ (date 2025 1 15, 100.0); (date 2025 4 10, 200.0) ])
+    (Flow.of_events [ (date 2025 1 15, 100.0); (date 2025 4 10, 200.0) ])
     [| 100.0; 0.0; 0.0; 200.0; 0.0; 0.0 |]
 
-(* Formula: pointwise *)
+(* Flow: pointwise *)
 
-let test_formula_pointwise () =
-  let a = Formula.of_array [| 1.0; 5.0; 3.0 |] in
-  let b = Formula.of_array [| 2.0; 4.0; 3.0 |] in
-  ev "add" tl3 (Formula.add a b) [| 3.0; 9.0; 6.0 |];
-  ev "sub" tl3 (Formula.sub a b) [| -1.0; 1.0; 0.0 |];
-  ev "mul" tl3 (Formula.mul a b) [| 2.0; 20.0; 9.0 |];
-  ev "div" tl3 (Formula.div a b) [| 0.5; 1.25; 1.0 |];
-  ev "neg" tl3 (Formula.neg a) [| -1.0; -5.0; -3.0 |];
-  ev "abs" tl3 (Formula.abs (Formula.neg a)) [| 1.0; 5.0; 3.0 |];
-  ev "min" tl3 (Formula.min a b) [| 1.0; 4.0; 3.0 |];
-  ev "max" tl3 (Formula.max a b) [| 2.0; 5.0; 3.0 |];
-  ev "scale" tl3 (Formula.scale 2.5 a) [| 2.5; 12.5; 7.5 |];
-  ev "clamp" tl3 (Formula.clamp ~lo:2.0 ~hi:4.0 a) [| 2.0; 4.0; 3.0 |];
-  ev "round" tl3 (Formula.round 2 (Formula.of_array [| 1.005; 2.555; 3.999 |])) [| 1.0; 2.56; 4.0 |];
-  ev "sum" tl3 (Formula.sum [ a; b; Formula.const 10.0 ]) [| 13.0; 19.0; 16.0 |];
-  ev "map" tl3 (Formula.map (fun x -> x *. 2.0) (Formula.const 5.0)) [| 10.0; 10.0; 10.0 |];
-  ev "map2" tl3 (Formula.map2 ( +. ) a b) [| 3.0; 9.0; 6.0 |];
+let test_flow_pointwise () =
+  let a = Flow.unsafe_of_array [| 1.0; 5.0; 3.0 |] in
+  let b = Flow.unsafe_of_array [| 2.0; 4.0; 3.0 |] in
+  ev "add" tl3 (Flow.add a b) [| 3.0; 9.0; 6.0 |];
+  ev "sub" tl3 (Flow.sub a b) [| -1.0; 1.0; 0.0 |];
+  ev "mul" tl3 (Flow.mul a b) [| 2.0; 20.0; 9.0 |];
+  ev "div" tl3 (Flow.div a b) [| 0.5; 1.25; 1.0 |];
+  ev "neg" tl3 (Flow.neg a) [| -1.0; -5.0; -3.0 |];
+  ev "abs" tl3 (Flow.abs (Flow.neg a)) [| 1.0; 5.0; 3.0 |];
+  ev "min" tl3 (Flow.min a b) [| 1.0; 4.0; 3.0 |];
+  ev "max" tl3 (Flow.max a b) [| 2.0; 5.0; 3.0 |];
+  ev "scale" tl3 (Flow.scale 2.5 a) [| 2.5; 12.5; 7.5 |];
+  ev "clamp" tl3 (Flow.clamp ~lo:2.0 ~hi:4.0 a) [| 2.0; 4.0; 3.0 |];
+  ev "round" tl3 (Flow.round 2 (Flow.unsafe_of_array [| 1.005; 2.555; 3.999 |])) [| 1.0; 2.56; 4.0 |];
+  ev "sum" tl3 (Flow.sum [ a; b; Flow.const 10.0 ]) [| 13.0; 19.0; 16.0 |];
+  ev "map" tl3 (Flow.map (fun x -> x *. 2.0) (Flow.const 5.0)) [| 10.0; 10.0; 10.0 |];
+  ev "map2" tl3 (Flow.map2 ( +. ) a b) [| 3.0; 9.0; 6.0 |];
   (* where: cond <> 0 selects then_, else otherwise *)
-  let cond = Formula.of_array [| 1.0; 0.0; 1.0 |] in
-  ev "where" tl3 (Formula.where ~cond ~then_:a ~else_:b) [| 1.0; 4.0; 3.0 |];
+  let cond = Flow.unsafe_of_array [| 1.0; 0.0; 1.0 |] in
+  ev "where" tl3 (Flow.where ~cond ~then_:a ~else_:b) [| 1.0; 4.0; 3.0 |];
   (* syntax spot-check *)
-  let open Formula.Syntax in
+  let open Flow.Syntax in
   ev "+" tl3 (a + b) [| 3.0; 9.0; 6.0 |];
   ev "*$" tl3 (2.0 *$ a) [| 2.0; 10.0; 6.0 |]
 
-(* Formula: cross-period *)
+(* Flow: cross-period *)
 
-let test_formula_cross_period () =
-  let flow = Formula.of_array [| 100.0; 200.0; 300.0 |] in
-  ev "prev" tl3 (Formula.prev flow ~default:0.0) [| 0.0; 100.0; 200.0 |];
+let test_flow_cross_period () =
+  let flow = Flow.unsafe_of_array [| 100.0; 200.0; 300.0 |] in
+  ev "prev" tl3 (Flow.prev flow ~default:0.0) [| 0.0; 100.0; 200.0 |];
   ev "scan" tl3
-    (Formula.scan ~init:1000.0 (fun ~acc ~x -> acc +. x) flow)
+    (Flow.scan ~init:1000.0 (fun ~acc ~x -> acc +. x) flow)
     [| 1100.0; 1300.0; 1600.0 |];
-  ev "cumsum" tl3 (Formula.cumsum ~init:1000.0 flow) [| 1100.0; 1300.0; 1600.0 |]
+  ev "cumsum" tl3
+    (Flow.scan ~init:1000.0 (fun ~acc ~x -> acc +. x) flow)
+    [| 1100.0; 1300.0; 1600.0 |]
 
-(* Formula: feedback *)
+(* Flow: feedback *)
 
-let test_formula_feedback () =
+let test_flow_feedback () =
   (* counter: simplest self-referential feedback *)
   ev "counter" tl3
-    (Formula.feedback ~default:0.0 (fun prev ->
-         let s = Formula.map (fun v -> v +. 1.0) prev in
+    (Flow.feedback ~default:0.0 (fun prev ->
+         let s = Flow.map (fun v -> v +. 1.0) prev in
          (s, s)))
     [| 1.0; 2.0; 3.0 |];
   (* doubling *)
   ev "doubling" tl3
-    (Formula.feedback ~default:1.0 (fun prev ->
-         let s = Formula.map (fun v -> v *. 2.0) prev in
+    (Flow.feedback ~default:1.0 (fun prev ->
+         let s = Flow.map (fun v -> v *. 2.0) prev in
          (s, s)))
     [| 2.0; 4.0; 8.0 |];
   (* mutual recursion: a = 1 + prev(b), b = 2*a *)
   let a, b =
-    Formula.feedback ~default:0.0 (fun prev_b ->
-        let a = Formula.add (Formula.const 1.0) prev_b in
-        let b = Formula.scale 2.0 a in
+    Flow.feedback ~default:0.0 (fun prev_b ->
+        let a = Flow.add (Flow.const 1.0) prev_b in
+        let b = Flow.scale 2.0 a in
         (b, (a, b)))
   in
-  fla "mutual a" [| 1.0; 3.0; 7.0 |] (Formula.eval tl3 a);
-  fla "mutual b" [| 2.0; 6.0; 14.0 |] (Formula.eval tl3 b);
+  fla "mutual a" [| 1.0; 3.0; 7.0 |] (Flow.Materialized.to_array (Flow.eval tl3 a));
+  fla "mutual b" [| 2.0; 6.0; 14.0 |] (Flow.Materialized.to_array (Flow.eval tl3 b));
   (* interest accrual: balance depends on interest depends on prev balance *)
   let balance, interest =
-    Formula.feedback ~default:100.0 (fun prev_bal ->
-        let interest = Formula.map (fun b -> b *. 0.01) prev_bal in
-        let balance = Formula.map2 (fun b i -> b +. 10.0 +. i) prev_bal interest in
+    Flow.feedback ~default:100.0 (fun prev_bal ->
+        let interest = Flow.map (fun b -> b *. 0.01) prev_bal in
+        let balance = Flow.map2 (fun b i -> b +. 10.0 +. i) prev_bal interest in
         (balance, (balance, interest)))
   in
-  let vb = Formula.eval tl3 balance in
-  let vi = Formula.eval tl3 interest in
+  let vb = Flow.Materialized.to_array (Flow.eval tl3 balance) in
+  let vi = Flow.Materialized.to_array (Flow.eval tl3 interest) in
   fl "bal[0]" 111.0 vb.(0);
   fl "bal[1]" 122.11 vb.(1);
   fl "int[0]" 1.0 vi.(0);
   fl "int[1]" 1.11 vi.(1)
 
-(* Formula: fixpoint *)
+(* Flow: fixpoint *)
 
-let test_formula_fixpoint () =
-  let c = Formula.of_array [| 10.0; 20.0; 30.0 |] in
+let test_flow_fixpoint () =
+  let c = Flow.unsafe_of_array [| 10.0; 20.0; 30.0 |] in
   (* x = 0.5*(x+c) converges to x=c *)
   ev "linear" tl3
-    (Formula.fixpoint ~guess:0.0 (fun x -> Formula.scale 0.5 (Formula.add x c)))
+    (Flow.fixpoint ~guess:0.0 (fun x -> Flow.scale 0.5 (Flow.add x c)))
     [| 10.0; 20.0; 30.0 |];
   (* warm start: period 1 starts from period 0's converged value *)
-  let c2 = Formula.of_array [| 10.0; 100.0; 100.0 |] in
+  let c2 = Flow.unsafe_of_array [| 10.0; 100.0; 100.0 |] in
   ev "warm start" tl3
-    (Formula.fixpoint ~guess:0.0 (fun x -> Formula.scale 0.5 (Formula.add x c2)))
+    (Flow.fixpoint ~guess:0.0 (fun x -> Flow.scale 0.5 (Flow.add x c2)))
     [| 10.0; 100.0; 100.0 |];
   (* fixpoint + feedback: flow converges to prev balance each period *)
   ev "fixpoint+feedback" tl3
-    (Formula.feedback ~default:100.0 (fun prev_bal ->
+    (Flow.feedback ~default:100.0 (fun prev_bal ->
          let flow =
-           Formula.fixpoint ~guess:0.0 (fun x -> Formula.scale 0.5 (Formula.add x prev_bal))
+           Flow.fixpoint ~guess:0.0 (fun x -> Flow.scale 0.5 (Flow.add x prev_bal))
          in
-         let balance = Formula.cumsum ~init:100.0 flow in
+         let balance = Flow.scan ~init:100.0 (fun ~acc ~x -> acc +. x) flow in
          (balance, balance)))
     [| 200.0; 400.0; 800.0 |];
   (* divergence: x = 2x+1 *)
   raises "diverges"
-    (Formula.Convergence_error { formula_name = Some "divergent"; period_index = 0; iterations = 5 })
+    (Flow.Convergence_error { formula_name = Some "divergent"; period_index = 0; iterations = 5 })
     (fun () ->
-      Formula.eval tl3
-        (Formula.fixpoint ~name:"divergent" ~max_iter:5 ~guess:0.0 (fun x ->
-             Formula.add (Formula.scale 2.0 x) (Formula.const 1.0))));
+      Flow.Materialized.to_array (Flow.eval tl3
+        (Flow.fixpoint ~name:"divergent" ~max_iter:5 ~guess:0.0 (fun x ->
+             Flow.add (Flow.scale 2.0 x) (Flow.const 1.0)))));
   (* LTC construction loan: loan = ltc * (base_cost + loan*rate) *)
   let ltc = 0.8 and rate = 0.05 in
-  let base_cost = Formula.of_array [| 1000.0; 2000.0; 3000.0 |] in
+  let base_cost = Flow.unsafe_of_array [| 1000.0; 2000.0; 3000.0 |] in
   let loan =
-    Formula.fixpoint ~guess:0.0 (fun commitment ->
-        Formula.scale ltc (Formula.add base_cost (Formula.scale rate commitment)))
+    Flow.fixpoint ~guess:0.0 (fun commitment ->
+        Flow.scale ltc (Flow.add base_cost (Flow.scale rate commitment)))
   in
-  let values = Formula.eval tl3 loan in
+  let values = Flow.Materialized.to_array (Flow.eval tl3 loan) in
   let expected i =
     let bc = [| 1000.0; 2000.0; 3000.0 |].(i) in
     ltc *. bc /. (1.0 -. (ltc *. rate))
@@ -359,88 +358,87 @@ let test_formula_fixpoint () =
   fl "ltc[1]" (expected 1) values.(1);
   fl "ltc[2]" (expected 2) values.(2)
 
-(* Formula: growth *)
+(* Flow: growth *)
 
-let test_formula_growth () =
+let test_flow_growth () =
   let sd = date 2025 1 1 in
   (* zero rate: constant *)
   ev "zero rate" tl3
-    (Formula.growth_simple ~start_date:sd ~rate:0.0 1000.0)
+    (Flow.growth_simple ~start_date:sd ~rate:0.0 1000.0)
     [| 1000.0; 1000.0; 1000.0 |];
   (* simple growth: monotonically increasing *)
-  let v = Formula.eval tl3 (Formula.growth_simple ~start_date:sd ~rate:1.0 1000.0) in
+  let v = Flow.Materialized.to_array (Flow.eval tl3 (Flow.growth_simple ~start_date:sd ~rate:1.0 1000.0)) in
   fl "simple p0" 1000.0 v.(0);
   check bool "simple grows" true (v.(2) > v.(1));
   (* simple growth with calendar_monthly daycount *)
   let v =
-    Formula.eval tl3
-      (Formula.growth_simple ~start_date:sd ~rate:1.0 ~daycount:Daycount.calendar_monthly 1200.0)
+    Flow.Materialized.to_array (Flow.eval tl3
+      (Flow.growth_simple ~start_date:sd ~rate:1.0 ~daycount:Daycount.calendar_monthly 1200.0))
   in
   fl "cm p0" 1200.0 v.(0);
   let yf1 = Daycount.calendar_monthly sd (date 2025 2 1) in
   fl "cm p1" (1200.0 *. (1.0 +. yf1)) v.(1);
   (* compound growth *)
-  let v = Formula.eval tl3 (Formula.growth_compound ~start_date:sd ~rate:0.10 1000.0) in
+  let v = Flow.Materialized.to_array (Flow.eval tl3 (Flow.growth_compound ~start_date:sd ~rate:0.10 1000.0)) in
   fl "compound p0" 1000.0 v.(0);
   let yf2 = Daycount.actual_360 sd (date 2025 3 1) in
   fl "compound p2" (1000.0 *. ((1.0 +. 0.10) ** yf2)) v.(2);
   (* year_frac: matches daycount applied to each period *)
-  let v = Formula.eval tl3 (Formula.year_frac Daycount.thirty_360_us) in
+  let v = Flow.Materialized.to_array (Flow.eval tl3 (Flow.year_frac Daycount.thirty_360_us)) in
   fl "yf jan" (Daycount.thirty_360_us (date 2025 1 1) (date 2025 2 1)) v.(0);
   fl "yf feb" (Daycount.thirty_360_us (date 2025 2 1) (date 2025 3 1)) v.(1)
 
-(* Formula: query *)
+(* Query: accrue + balance_at via Materialized *)
 
-let test_formula_query () =
+let test_query () =
   let tl = Timeline.monthly ~start_date:(date 2025 1 1) ~n:3 in
-  (* interpolate *)
+  (* accrue partial = interpolate equivalent *)
+  let s = Flow.unsafe_of_array [| 310.0; 280.0; 310.0 |] in
+  let m = Flow.eval tl s in
   fl "interp jan16"
     (310.0 *. 15.0 /. 31.0)
-    (Formula.Query.interpolate tl [| 310.0; 280.0; 310.0 |] (date 2025 1 16));
-  raises "interp outside"
-    (Invalid_argument "Formula.Query.interpolate: date 2024-01-01 is outside the timeline")
-    (fun () -> Formula.Query.interpolate tl [| 100.0; 280.0; 310.0 |] (date 2024 1 1));
+    (Flow.Materialized.accrue m ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 16));
   (* accrue *)
-  let vals = [| 100.0; 200.0; 300.0 |] in
+  let vals_s = Flow.unsafe_of_array [| 100.0; 200.0; 300.0 |] in
+  let vals_m = Flow.eval tl vals_s in
   fl "accrue full" 600.0
-    (Formula.Query.accrue tl vals ~start_date:(date 2025 1 1) ~end_date:(date 2025 4 1));
+    (Flow.Materialized.accrue vals_m ~start_date:(date 2025 1 1) ~end_date:(date 2025 4 1));
   fl "accrue feb" 200.0
-    (Formula.Query.accrue tl vals ~start_date:(date 2025 2 1) ~end_date:(date 2025 3 1));
+    (Flow.Materialized.accrue vals_m ~start_date:(date 2025 2 1) ~end_date:(date 2025 3 1));
   let tl1 = Timeline.monthly ~start_date:(date 2025 1 1) ~n:1 in
+  let m1 = Flow.eval tl1 (Flow.const 310.0) in
   fl "accrue partial"
     (310.0 *. 15.0 /. 31.0)
-    (Formula.Query.accrue tl1 [| 310.0 |]
+    (Flow.Materialized.accrue m1
        ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 16));
-  (* balance_at *)
-  let flow = Formula.of_array [| 100.0; 200.0; 300.0 |] in
-  let balance = Formula.cumsum ~init:1000.0 flow in
-  let fv = Formula.eval tl flow in
-  let bv = Formula.eval tl balance in
-  fl "bal jan1" 1000.0 (Formula.Query.balance_at tl ~balance:bv ~flow:fv (date 2025 1 1));
+  (* balance_at via Balance.Materialized.at *)
+  let flow = Flow.unsafe_of_array [| 100.0; 200.0; 300.0 |] in
+  let balance = Balance.roll_forward ~init:1000.0 flow in
+  let bal_m = Balance.eval tl balance in
+  fl "bal jan1" 1000.0 (Balance.Materialized.at bal_m (date 2025 1 1));
   fl "bal feb15"
     (1100.0 +. (200.0 *. 14.0 /. 28.0))
-    (Formula.Query.balance_at tl ~balance:bv ~flow:fv (date 2025 2 15));
-  raises "bal outside"
-    (Invalid_argument "Formula.Query.balance_at: date 2024-01-01 is outside the timeline")
-    (fun () -> Formula.Query.balance_at tl ~balance:bv ~flow:fv (date 2024 1 1))
+    (Balance.Materialized.at bal_m (date 2025 2 15));
+  invalid "Balance.Materialized.at: date 2024-01-01 is outside the timeline"
+    (fun () -> ignore (Balance.Materialized.at bal_m (date 2024 1 1)))
 
 (* Materialized *)
 
 let test_materialized () =
-  let s = Formula.of_array [| 10.0; 20.0; 30.0 |] in
-  let m = Formula.eval_materialized tl3 s in
-  check int "length" 3 (Formula.Materialized.length m);
-  fl "get 0" 10.0 (Formula.Materialized.get m 0);
-  fl "get 2" 30.0 (Formula.Materialized.get m 2);
-  ds "period 0 start" "2025-01-01" (Period.start_date (Formula.Materialized.period m 0));
-  let pairs = Formula.Materialized.to_list m in
+  let s = Flow.unsafe_of_array [| 10.0; 20.0; 30.0 |] in
+  let m = Flow.eval tl3 s in
+  check int "length" 3 (Flow.Materialized.length m);
+  fl "get 0" 10.0 (Flow.Materialized.get m 0);
+  fl "get 2" 30.0 (Flow.Materialized.get m 2);
+  ds "period 0 start" "2025-01-01" (Period.start_date (Flow.Materialized.period m 0));
+  let pairs = Flow.Materialized.to_list m in
   check int "to_list len" 3 (List.length pairs);
   let sum =
-    Formula.Materialized.fold (fun acc _p v -> acc +. v) 0.0 m
+    Flow.Materialized.fold (fun acc _p v -> acc +. v) 0.0 m
   in
   fl "fold sum" 60.0 sum;
   let count = ref 0 in
-  Formula.Materialized.iter (fun _p _v -> incr count) m;
+  Flow.Materialized.iter (fun _p _v -> incr count) m;
   check int "iter count" 3 !count
 
 (* Statement *)
@@ -454,8 +452,8 @@ let test_statement () =
   let expenses =
     Statement.group "Expenses"
       [
-        Statement.formula_line "Rent" (Formula.const 2000.0);
-        Statement.formula_line "Salaries" (Formula.const 3000.0);
+        Statement.flow_line "Rent" (Flow.const 2000.0);
+        Statement.flow_line "Salaries" (Flow.const 3000.0);
       ]
   in
   (match
@@ -469,8 +467,8 @@ let test_statement () =
   let income =
     Statement.group "Income"
       [
-        Statement.formula_line "Revenue" (Formula.const 1000.0);
-        Statement.formula_line "COGS" (Formula.const 300.0);
+        Statement.flow_line "Revenue" (Flow.const 1000.0);
+        Statement.flow_line "COGS" (Flow.const 300.0);
       ]
   in
   check int "lines" 2 (List.length (Statement.lines (Statement.eval tl3 income)));
@@ -479,13 +477,13 @@ let test_statement () =
   let rich =
     Statement.group "Income"
       [
-        Statement.formula_line "Revenue" (Formula.const 1000.0);
-        Statement.formula_group "Costs"
+        Statement.flow_line "Revenue" (Flow.const 1000.0);
+        Statement.flow_group "Costs"
           [
-            Statement.formula_line "COGS" (Formula.const 300.0);
-            Statement.formula_line "Rent" (Formula.const 200.0);
+            Statement.flow_line "COGS" (Flow.const 300.0);
+            Statement.flow_line "Rent" (Flow.const 200.0);
           ];
-        Statement.formula_line "Net" (Formula.const 500.0);
+        Statement.flow_line "Net" (Flow.const 500.0);
       ]
   in
   let out = to_s (fun ppf -> Statement.pp (Statement.layout tl) ppf (Statement.eval tl rich)) in
@@ -502,7 +500,7 @@ let test_statement () =
   let out =
     to_s (fun ppf ->
         Statement.pp l ppf
-          (Statement.eval tl2 (Statement.formula_line "Test" (Formula.const 42.0))))
+          (Statement.eval tl2 (Statement.flow_line "Test" (Flow.const 42.0))))
   in
   check bool "custom P0" true (has "P0" out);
   check bool "custom sep" true (has "=====" out);
@@ -550,57 +548,34 @@ let test_statement () =
    with
   | Some arr -> fla "balance auto_total" [| 300.0; 300.0; 300.0 |] arr
   | None -> fail "expected balance auto_total");
-  (* eval_materialized keeps period bindings *)
-  let mat_stmt =
-    Statement.eval_materialized tl3
-      (Statement.group "G"
-         [
-           Statement.formula_line "A" (Formula.const 7.0);
-           Statement.formula_line "B" (Formula.const 3.0);
-         ])
-  in
-  let mat_lines = Statement.lines mat_stmt in
-  List.iter
-    (fun (_, m) ->
-      check int "mat length" 3 (Formula.Materialized.length m);
-      let p0 = Formula.Materialized.period m 0 in
-      check bool "mat period" true (Date.equal (Period.start_date p0) (date 2025 1 1)))
-    mat_lines;
-  (* total is also materialized *)
-  (match
-     Statement.fold mat_stmt
-       ~line_fn:(fun _ _ -> None)
-       ~group_fn:(fun _ _ total -> total)
-   with
-  | Some m -> fla "mat total" [| 10.0; 10.0; 10.0 |] (Formula.Materialized.to_array m)
-  | None -> fail "expected materialized total")
+  ()
 
 (* Deps *)
 
 let test_deps () =
-  let a = Formula.init ~name:"A" (fun _i _p -> 1.0) in
-  let b = Formula.init ~name:"B" (fun _i _p -> 2.0) in
-  let c = Formula.add a b |> Formula.named "C" in
-  let nodes, edges = Formula.Deps.graph [ c ] in
+  let a = Flow.init_indexed ~name:"A" (fun _i _p -> 1.0) in
+  let b = Flow.init_indexed ~name:"B" (fun _i _p -> 2.0) in
+  let c = Flow.add a b |> Flow.named "C" in
+  let nodes, edges = Flow.Deps.graph [ c ] in
   check int "nodes" 3 (List.length nodes);
   check int "edges" 2 (List.length edges);
   let names =
-    List.filter_map (fun (n : Formula.Deps.node) -> n.name) nodes |> List.sort String.compare
+    List.filter_map (fun (n : Flow.Deps.node) -> n.name) nodes |> List.sort String.compare
   in
   check (list string) "names" [ "A"; "B"; "C" ] names;
   (* shared node deduplication *)
-  let shared = Formula.init ~name:"Shared" (fun _i _p -> 1.0) in
-  let x = Formula.map ~name:"X" (fun v -> v +. 1.0) shared in
-  let y = Formula.map ~name:"Y" (fun v -> v *. 2.0) shared in
-  let z = Formula.add x y |> Formula.named "Z" in
-  let nodes, edges = Formula.Deps.graph [ z ] in
+  let shared = Flow.init_indexed ~name:"Shared" (fun _i _p -> 1.0) in
+  let x = Flow.map ~name:"X" (fun v -> v +. 1.0) shared in
+  let y = Flow.map ~name:"Y" (fun v -> v *. 2.0) shared in
+  let z = Flow.add x y |> Flow.named "Z" in
+  let nodes, edges = Flow.Deps.graph [ z ] in
   check int "shared nodes" 4 (List.length nodes);
   check int "shared edges" 4 (List.length edges);
   (* named_only collapses unnamed intermediaries *)
-  let revenue = Formula.init ~name:"Revenue" (fun _i _p -> 1000.0) in
-  let cogs = Formula.map (fun x -> x *. 0.3) revenue |> Formula.named "COGS" in
-  let gp = Formula.sub revenue cogs |> Formula.named "Gross Profit" in
-  let nodes, edges = Formula.Deps.graph ~named_only:true [ gp ] in
+  let revenue = Flow.init_indexed ~name:"Revenue" (fun _i _p -> 1000.0) in
+  let cogs = Flow.map (fun x -> x *. 0.3) revenue |> Flow.named "COGS" in
+  let gp = Flow.sub revenue cogs |> Flow.named "Gross Profit" in
+  let nodes, edges = Flow.Deps.graph ~named_only:true [ gp ] in
   check int "named nodes" 3 (List.length nodes);
   check int "named edges" 3 (List.length edges)
 
@@ -801,7 +776,7 @@ let test_schedule () =
 (* Flow *)
 
 let test_flow () =
-  let evf msg tl f exp = fla msg exp (Flow.eval_values tl f) in
+  let evf msg tl f exp = fla msg exp (Flow.Materialized.to_array (Flow.eval tl f)) in
   evf "const" tl3 (Flow.const 42.0) [| 42.0; 42.0; 42.0 |];
   evf "of_array" tl3 (Flow.unsafe_of_array [| 1.0; 2.0 |]) [| 1.0; 2.0; 0.0 |];
   evf "init" tl3
@@ -818,9 +793,6 @@ let test_flow () =
   evf "scale" tl3 (Flow.scale 2.0 a) [| 20.0; 40.0; 60.0 |];
   evf "neg" tl3 (Flow.neg a) [| -10.0; -20.0; -30.0 |];
   evf "sum" tl3 (Flow.sum [ a; b; Flow.const 100.0 ]) [| 111.0; 122.0; 133.0 |];
-  (* escape hatch roundtrip *)
-  let f = Flow.unsafe_of_formula (Flow.unsafe_to_formula a) in
-  evf "roundtrip" tl3 f [| 10.0; 20.0; 30.0 |];
   (* named *)
   let _ = Flow.named "Revenue" a in
   (* of_periods: exact match *)
@@ -840,8 +812,8 @@ let test_flow () =
     [| 0.0; 0.0; 0.0 |];
   (* of_events: out-of-range raises *)
   invalid "Formula.of_events: event date 2024-01-01 is outside the timeline"
-    (fun () -> ignore (Flow.eval_values tl3
-      (Flow.of_events [ (date 2024 1 1, 100.0) ])));
+    (fun () -> ignore (Flow.Materialized.to_array (Flow.eval tl3
+      (Flow.of_events [ (date 2024 1 1, 100.0) ]))));
   (* eval returns Materialized *)
   let m = Flow.eval tl3 a in
   check int "mat length" 3 (Flow.Materialized.length m);
@@ -917,7 +889,7 @@ let test_flow () =
 (* Balance *)
 
 let test_balance () =
-  let evb msg tl b exp = fla msg exp (Balance.eval_values tl b) in
+  let evb msg tl b exp = fla msg exp (Balance.Materialized.to_array (Balance.eval tl b)) in
   evb "const" tl3 (Balance.const 100.0) [| 100.0; 100.0; 100.0 |];
   evb "of_array" tl3 (Balance.unsafe_of_array [| 10.0; 20.0 |]) [| 10.0; 20.0; 0.0 |];
   (* roll_forward: running sum *)
@@ -941,9 +913,6 @@ let test_balance () =
   evb "prev" tl3 (Balance.prev a ~default:0.0) [| 0.0; 10.0; 20.0 |];
   evb "at_period_start" tl3 (Balance.at_period_start a ~default:0.0) [| 0.0; 10.0; 20.0 |];
   evb "at_period_end" tl3 (Balance.at_period_end a) [| 10.0; 20.0; 30.0 |];
-  (* escape hatch roundtrip *)
-  let rt = Balance.unsafe_of_formula (Balance.unsafe_to_formula a) in
-  evb "roundtrip" tl3 rt [| 10.0; 20.0; 30.0 |];
   (* eval returns Materialized *)
   let m = Balance.eval tl3 a in
   check int "mat length" 3 (Balance.Materialized.length m);
@@ -976,22 +945,18 @@ let test_balance () =
     (Balance.Materialized.at bal_m (date 2025 2 15));
   fl "at end" 1600.0
     (Balance.Materialized.at bal_m (date 2025 4 1));
-  (* at: Step interpolation pro-rates the balance value *)
-  fl "at step feb15"
-    (1300.0 *. 14.0 /. 28.0)
-    (Balance.Materialized.at ~interp:Step bal_m (date 2025 2 15));
   (* eval: values are correct *)
   fl "eval bal 0" 1100.0 (Balance.Materialized.get bal_m 0);
   fl "eval bal 2" 1600.0 (Balance.Materialized.get bal_m 2);
   (* change: balance -> flow *)
   let bal = Balance.unsafe_of_array [| 100.0; 150.0; 120.0 |] in
   let chg = Balance.change bal ~default:0.0 in
-  fla "change" [| 100.0; 50.0; -30.0 |] (Flow.eval_values tl3 chg);
+  fla "change" [| 100.0; 50.0; -30.0 |] (Flow.Materialized.to_array (Flow.eval tl3 chg));
   (* roundtrip: roll_forward (change b) ~ b when default = init *)
   let flow2 = Flow.unsafe_of_array [| 10.0; 20.0; 30.0 |] in
   let bal2 = Balance.roll_forward ~init:0.0 flow2 in
   let chg2 = Balance.change bal2 ~default:0.0 in
-  fla "roundtrip change" [| 10.0; 20.0; 30.0 |] (Flow.eval_values tl3 chg2);
+  fla "roundtrip change" [| 10.0; 20.0; 30.0 |] (Flow.Materialized.to_array (Flow.eval tl3 chg2));
   (* of_dates: last-observation-wins *)
   evb "of_dates" tl3
     (Balance.of_dates [ (date 2025 1 15, 100.0); (date 2025 2 10, 200.0) ])
@@ -1014,8 +979,8 @@ let test_balance () =
     [| 100.0; 200.0; 200.0 |];
   (* of_dates: out-of-range raises *)
   invalid "Balance.of_dates: observation date 2024-01-01 is outside the timeline"
-    (fun () -> ignore (Balance.eval_values tl3
-      (Balance.of_dates [ (date 2024 1 1, 100.0) ])));
+    (fun () -> ignore (Balance.Materialized.to_array (Balance.eval tl3
+      (Balance.of_dates [ (date 2024 1 1, 100.0) ]))));
   (* feedback: interest accrual on previous balance *)
   let balance2, interest =
     Balance.feedback ~default:100.0 (fun prev_bal ->
@@ -1023,8 +988,8 @@ let test_balance () =
         let balance = Balance.roll_forward ~init:100.0 interest in
         (balance, (balance, interest)))
   in
-  let vb2 = Balance.eval_values tl3 balance2 in
-  let vi = Flow.eval_values tl3 interest in
+  let vb2 = Balance.Materialized.to_array (Balance.eval tl3 balance2) in
+  let vi = Flow.Materialized.to_array (Flow.eval tl3 interest) in
   fl "fb bal[0]" 101.0 vb2.(0);
   fl "fb int[0]" 1.0 vi.(0);
   fl "fb int[1]" 1.01 vi.(1);
@@ -1036,7 +1001,7 @@ let test_balance () =
         Balance.map2 (fun bc c -> ltc *. (bc +. rate *. c))
           base_cost commitment)
   in
-  let lv = Balance.eval_values tl3 loan in
+  let lv = Balance.Materialized.to_array (Balance.eval tl3 loan) in
   let expected i =
     let bc = [| 1000.0; 2000.0; 3000.0 |].(i) in
     ltc *. bc /. (1.0 -. (ltc *. rate))
@@ -1050,20 +1015,20 @@ let test_balance () =
 let test_coffee_shop () =
   let tl = Timeline.monthly ~start_date:(date 2025 1 1) ~n:12 in
   let revenue =
-    Formula.init ~name:"revenue" (fun _i p ->
+    Flow.init_indexed ~name:"revenue" (fun _i p ->
         let sd = Period.start_date p in
         8000.0 *. (1.0 +. (0.05 *. Daycount.calendar_monthly (date 2025 1 1) sd)))
   in
-  let cogs = Formula.scale 0.30 revenue in
-  let rent = Formula.const 2000.0 in
-  let salaries = Formula.const 3500.0 in
-  let total_opex = Formula.sum [ cogs; rent; salaries ] in
-  let net_income = Formula.sub revenue total_opex in
-  let equipment = Formula.of_events [ (date 2025 1 15, -15000.0) ] in
-  let total_flow = Formula.add net_income equipment in
-  let cash = Formula.cumsum ~name:"cash" ~init:50000.0 total_flow in
-  let rv = Formula.eval tl revenue in
-  let cv = Formula.eval tl cash in
+  let cogs = Flow.scale 0.30 revenue in
+  let rent = Flow.const 2000.0 in
+  let salaries = Flow.const 3500.0 in
+  let total_opex = Flow.sum [ cogs; rent; salaries ] in
+  let net_income = Flow.sub revenue total_opex in
+  let equipment = Flow.of_events [ (date 2025 1 15, -15000.0) ] in
+  let total_flow = Flow.add net_income equipment in
+  let cash = Balance.roll_forward ~name:"cash" ~init:50000.0 total_flow in
+  let rv = Flow.Materialized.to_array (Flow.eval tl revenue) in
+  let cv = Balance.Materialized.to_array (Balance.eval tl cash) in
   fl "revenue m0" 8000.0 rv.(0);
   check bool "revenue grows" true (rv.(11) > rv.(0));
   fl "cash m0" 35100.0 cv.(0);
@@ -1176,15 +1141,15 @@ let () =
       ("Daycount", [ test_case "daycount" `Quick test_daycount ]);
       ("Calendar", [ test_case "calendar" `Quick test_calendar ]);
       ("Schedule", [ test_case "schedule" `Quick test_schedule ]);
-      ( "Formula",
+      ( "Flow combinators",
          [
-           test_case "constructors" `Quick test_formula_constructors;
-           test_case "pointwise" `Quick test_formula_pointwise;
-           test_case "cross-period" `Quick test_formula_cross_period;
-           test_case "feedback" `Quick test_formula_feedback;
-           test_case "fixpoint" `Quick test_formula_fixpoint;
-           test_case "growth" `Quick test_formula_growth;
-           test_case "query" `Quick test_formula_query;
+           test_case "constructors" `Quick test_flow_constructors;
+           test_case "pointwise" `Quick test_flow_pointwise;
+           test_case "cross-period" `Quick test_flow_cross_period;
+           test_case "feedback" `Quick test_flow_feedback;
+           test_case "fixpoint" `Quick test_flow_fixpoint;
+           test_case "growth" `Quick test_flow_growth;
+           test_case "query" `Quick test_query;
          ] );
       ("Materialized", [ test_case "materialized" `Quick test_materialized ]);
       ("Statement", [ test_case "statement" `Quick test_statement ]);
