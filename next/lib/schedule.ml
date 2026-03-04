@@ -108,7 +108,7 @@ let unadjusted_periods s = make_periods s.unadjusted
 let to_timeline s = Timeline.of_periods_unsafe (periods s)
 let to_unadjusted_timeline s = Timeline.of_periods_unsafe (unadjusted_periods s)
 
-let to_events ?(at = `Start) f s =
+let to_events ~at f s =
   let ps = periods s in
   List.init (Array.length ps) (fun i ->
     let d = match at with `Start -> Period.start_date ps.(i) | `End -> Period.end_date ps.(i) in

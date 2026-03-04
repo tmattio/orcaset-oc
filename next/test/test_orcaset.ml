@@ -731,7 +731,7 @@ let test_schedule () =
   check bool "tl start" true (Date.equal adj.(0) (Timeline.start_date tl));
   check bool "tl end" true (Date.equal adj.(4) (Timeline.end_date tl));
   (* to_events *)
-  let events = Schedule.to_events (fun i _p -> float_of_int (i + 1) *. 100.0) s in
+  let events = Schedule.to_events ~at:`Start (fun i _p -> float_of_int (i + 1) *. 100.0) s in
   check int "events len" 4 (List.length events);
   let e0_date, e0_val = List.hd events in
   check bool "event0 date" true (Date.equal adj.(0) e0_date);

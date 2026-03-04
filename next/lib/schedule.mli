@@ -125,11 +125,11 @@ val to_unadjusted_timeline : t -> Timeline.t
 (** [to_unadjusted_timeline s] is a {!Timeline.t} built from the unadjusted periods of [s]. *)
 
 val to_events :
-  ?at:[ `Start | `End ] -> (int -> Period.t -> float) -> t -> (Date.t * float) list
+  at:[ `Start | `End ] -> (int -> Period.t -> float) -> t -> (Date.t * float) list
 (** [to_events ~at f s] pairs each adjusted period's date with [f i period], producing an event
     list suitable for {!Formula.of_events}. [at] selects whether the event date is the period's
-    start date ([`Start], the default) or end date ([`End]). [i] is the zero-based period index and
-    [period] is the adjusted period.
+    start date ([`Start]) or end date ([`End]). [i] is the zero-based period index and [period] is
+    the adjusted period.
 
     {[
       (* Interest payments at end of each period *)

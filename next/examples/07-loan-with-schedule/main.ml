@@ -73,7 +73,7 @@ let loan_balance, (interest_pmt, principal_pmt) =
 
 let bridge_to_monthly name flow =
   let vals = Flow.eval loan_tl flow in
-  Flow.of_events ~name (Schedule.to_events (fun i _p -> vals.(i)) loan_sched)
+  Flow.of_events ~name (Schedule.to_events ~at:`End (fun i _p -> vals.(i)) loan_sched)
 
 let monthly_interest = bridge_to_monthly "Loan Interest" interest_pmt
 let monthly_principal = bridge_to_monthly "Loan Principal" principal_pmt
