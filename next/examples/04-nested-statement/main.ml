@@ -140,13 +140,7 @@ let () =
   (* Dependency graph *)
   let oc = open_out "model.dot" in
   let dot_ppf = Format.formatter_of_out_channel oc in
-  Formula.Deps.pp_dot dot_ppf
-    [
-      Flow.unsafe_to_formula recurring_revenue;
-      Flow.unsafe_to_formula non_recurring_revenue;
-      Flow.unsafe_to_formula recurring_cost;
-      Flow.unsafe_to_formula non_recurring_cost;
-      Flow.unsafe_to_formula admin;
-    ];
+  Flow.Deps.pp_dot dot_ppf
+    [ recurring_revenue; non_recurring_revenue; recurring_cost; non_recurring_cost; admin ];
   Format.pp_print_flush dot_ppf ();
   close_out oc

@@ -66,10 +66,10 @@ let balance, (interest_pmt, principal_pmt) =
 
 let () =
   let balance_m = Balance.eval tl balance in
-  let balance_values = Balance.Materialized.unsafe_values balance_m in
-  let interest_values = Flow.eval_values tl interest_pmt in
-  let principal_values = Flow.eval_values tl principal_pmt in
-  let total_values = Flow.eval_values tl total_pmt in
+  let balance_values = Balance.Materialized.to_array balance_m in
+  let interest_values = Flow.Materialized.to_array (Flow.eval tl interest_pmt) in
+  let principal_values = Flow.Materialized.to_array (Flow.eval tl principal_pmt) in
+  let total_values = Flow.Materialized.to_array (Flow.eval tl total_pmt) in
 
   Printf.printf "=== Fixed-Rate Amortizing Loan Schedule ===\n";
   Printf.printf "Loan Amount:     $%.2f\n" loan_amount;
@@ -121,7 +121,6 @@ let () =
   (* Dependency graph *)
   let oc = open_out "model.dot" in
   let ppf = Format.formatter_of_out_channel oc in
-  Formula.Deps.pp_dot ppf
-    [ Balance.unsafe_to_formula balance; Flow.unsafe_to_formula interest_pmt; Flow.unsafe_to_formula principal_pmt ];
+  Flow.Deps.pp_dot ppf [ interest_pmt; principal_pmt ];
   Format.pp_print_flush ppf ();
   close_out oc

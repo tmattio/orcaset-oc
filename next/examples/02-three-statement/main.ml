@@ -148,6 +148,6 @@ let () =
   (* Dependency graph *)
   let oc = open_out "model.dot" in
   let dot_ppf = Format.formatter_of_out_channel oc in
-  Formula.Deps.pp_dot dot_ppf [ Balance.unsafe_to_formula balance_check ];
+  Balance.Deps.pp_dot dot_ppf [ balance_check ];
   Format.pp_print_flush dot_ppf ();
   close_out oc

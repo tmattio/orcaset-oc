@@ -11,7 +11,7 @@
 
     Key patterns demonstrated:
     - [Flow.t] for all revenue and expense line items.
-    - [Flow.prev] + [Flow.map] for cross-period dependency.
+    - [Flow.prev] + [Flow.map] for cross-period dependency (via hidden internal API).
     - [Statement.flow_line] for typed statement construction. *)
 
 open Orcaset2
@@ -88,6 +88,6 @@ let () =
   (* Dependency graph *)
   let oc = open_out "model.dot" in
   let ppf = Format.formatter_of_out_channel oc in
-  Formula.Deps.pp_dot ppf [ Flow.unsafe_to_formula income ];
+  Flow.Deps.pp_dot ppf [ income ];
   Format.pp_print_flush ppf ();
   close_out oc

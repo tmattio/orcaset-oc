@@ -7,7 +7,7 @@
     Key patterns demonstrated:
     - [Flow.t] for all revenue, expense, and cash flow line items.
     - [Balance.feedback] for loan amortization (prior balance drives interest).
-    - [Formula.feedback] for the revenue/OpEx circular dependency (CAM recoveries depend on
+    - [Flow.feedback] for the revenue/OpEx circular dependency (CAM recoveries depend on
       prior-period OpEx, which includes management fees that depend on current-period EGI).
     - [Flow.growth_simple] for calendar-aware annual growth.
     - [Flow.year_frac] and [Flow.mul] for interest calculations.
@@ -104,17 +104,16 @@ let security =
 (* Revenue ↔ OpEx feedback loop *)
 
 (* CAM recoveries depend on prior-period OpEx, but OpEx includes management
-   (% of EGI), and EGI includes CAM. [Formula.feedback] breaks the cycle: the
-   function receives the prior period's opex_total and returns the current
-   definition. The boundary uses [Flow.unsafe_of_formula]/[Flow.unsafe_to_formula] to cross
-   between Formula.feedback's raw formula and the typed Flow world. *)
+   (% of EGI), and EGI includes CAM. [Flow.feedback] breaks the cycle: the
+   function receives the prior period's opex_total as a Flow.t and returns
+   the current definition. *)
 let cam_recoveries, gross_potential_rent, vacancy_loss, egi, property_management, opex_total =
-  Formula.feedback ~default:0.0 (fun prev_opex ->
+  Flow.feedback ~default:0.0 (fun prev_opex ->
       let cam_recoveries =
         Flow.map ~name:"CAM Recoveries"
           (fun prev ->
             if prev = 0.0 then cam_estimate_first else Float.abs prev *. cam_recovery_pct)
-          (Flow.unsafe_of_formula prev_opex)
+          prev_opex
       in
       let gross_potential_rent =
         Flow.sum ~name:"GPR" [ base_rent; parking; cam_recoveries; other_income ]
@@ -139,7 +138,7 @@ let cam_recoveries, gross_potential_rent, vacancy_loss, egi, property_management
             security;
           ]
       in
-      ( Flow.unsafe_to_formula opex_total,
+      ( opex_total,
         (cam_recoveries, gross_potential_rent, vacancy_loss, egi, property_management, opex_total)
       ))
 
@@ -276,6 +275,6 @@ let () =
   (* Dependency graph *)
   let oc = open_out "model.dot" in
   let ppf = Format.formatter_of_out_channel oc in
-  Formula.Deps.pp_dot ppf [ Flow.unsafe_to_formula cfaf ];
+  Flow.Deps.pp_dot ppf [ cfaf ];
   Format.pp_print_flush ppf ();
   close_out oc

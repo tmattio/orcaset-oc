@@ -4,15 +4,12 @@
     model (revenue, opex, capex, debt) evaluated against a shared timeline. Aggregation is
     parallelized across CPU cores with [Domain.spawn].
 
-    Each property's formulas are evaluated independently via [Formula.eval_many], then the resulting
+    Each property's flows are evaluated independently via [Flow.eval_many], then the resulting
     [float array] values are summed across properties. The final portfolio totals are assembled into
-    a [Statement] built from raw [float array] data rather than [Formula.t] values -- showing that
+    a [Statement] built from raw [float array] data rather than [Flow.t] values -- showing that
     [Statement.group], [Statement.line], and [Statement.pp] work with pre-evaluated arrays.
 
-    Internally, [build_property] uses [Flow.t] and [Balance.t] for typed construction, then extracts
-    the underlying [Formula.t] via escape hatches for uniform evaluation.
-
-    Demonstrates: Flow.t, Balance.t, Balance.feedback, Formula.eval_many, Statement.line,
+    Demonstrates: Flow.t, Balance.t, Balance.feedback, Flow.eval_many, Statement.line,
     Statement.group, Statement.layout, Statement.pp, Domain.spawn, parallel aggregation. *)
 
 open Orcaset2
@@ -63,9 +60,8 @@ type assumptions = {
   leasing_commission_pct : float;
 }
 
-(* Build all line items for a single property. Uses [Flow.t] and [Balance.t]
-   internally for typed construction, then extracts [Formula.t] at the return
-   boundary for uniform evaluation via [Formula.eval_many]. *)
+(* Build all line items for a single property. Returns named [Flow.t] values
+   for uniform evaluation via [Flow.eval_many]. *)
 let build_property (a : assumptions) =
   let annual_growth ~name ~initial ~rate =
     Flow.init ~name (fun p ->
@@ -107,12 +103,12 @@ let build_property (a : assumptions) =
     annual_growth ~name:"Security" ~initial:(-.a.security_monthly) ~rate:a.expense_growth
   in
   let cam_recoveries, gpr, vacancy_loss, egi, management, opex_total =
-    Formula.feedback ~default:0.0 (fun prev_opex ->
+    Flow.feedback ~default:0.0 (fun prev_opex ->
         let cam_recoveries =
           Flow.map ~name:"CAM Recoveries"
             (fun prev ->
               if prev = 0.0 then a.cam_estimate_first else Float.abs prev *. a.cam_recovery_pct)
-            (Flow.unsafe_of_formula prev_opex)
+            prev_opex
         in
         let gpr = Flow.sum ~name:"GPR" [ base_rent; parking; cam_recoveries; other_income ] in
         let vacancy_loss = Flow.named "Vacancy Loss" (Flow.scale (-.a.vacancy_rate) gpr) in
@@ -133,7 +129,7 @@ let build_property (a : assumptions) =
               security;
             ]
         in
-        (Flow.unsafe_to_formula opex_total,
+        (opex_total,
          (cam_recoveries, gpr, vacancy_loss, egi, management, opex_total)))
   in
 
@@ -179,35 +175,33 @@ let build_property (a : assumptions) =
   (* CFAF *)
   let cfaf = Flow.named "CFAF" (Flow.add cfbf debt_service) in
 
-  (* Extract Formula.t for uniform eval_many *)
-  let f = Flow.unsafe_to_formula in
   [
-    ("Base Rent", f base_rent);
-    ("Parking Income", f parking);
-    ("CAM Recoveries", f cam_recoveries);
-    ("Other Income", f other_income);
-    ("GPR", f gpr);
-    ("Vacancy & Credit Loss", f vacancy_loss);
-    ("EGI", f egi);
-    ("Property Taxes", f property_taxes);
-    ("Insurance", f insurance);
-    ("Utilities", f utilities);
-    ("Repairs & Maintenance", f repairs);
-    ("Property Management", f management);
-    ("Janitorial", f janitorial);
-    ("Landscaping", f landscaping);
-    ("Security", f security);
-    ("Total OpEx", f opex_total);
-    ("NOI", f noi);
-    ("Capital Reserves", f capital_reserves);
-    ("Tenant Improvements", f ti);
-    ("Leasing Commissions", f leasing_commissions);
-    ("Total CapEx", f capex_total);
-    ("CFBF", f cfbf);
-    ("Interest Expense", f interest);
-    ("Principal Payment", f principal);
-    ("Total Debt Service", f debt_service);
-    ("CFAF", f cfaf);
+    ("Base Rent", base_rent);
+    ("Parking Income", parking);
+    ("CAM Recoveries", cam_recoveries);
+    ("Other Income", other_income);
+    ("GPR", gpr);
+    ("Vacancy & Credit Loss", vacancy_loss);
+    ("EGI", egi);
+    ("Property Taxes", property_taxes);
+    ("Insurance", insurance);
+    ("Utilities", utilities);
+    ("Repairs & Maintenance", repairs);
+    ("Property Management", management);
+    ("Janitorial", janitorial);
+    ("Landscaping", landscaping);
+    ("Security", security);
+    ("Total OpEx", opex_total);
+    ("NOI", noi);
+    ("Capital Reserves", capital_reserves);
+    ("Tenant Improvements", ti);
+    ("Leasing Commissions", leasing_commissions);
+    ("Total CapEx", capex_total);
+    ("CFBF", cfbf);
+    ("Interest Expense", interest);
+    ("Principal Payment", principal);
+    ("Total Debt Service", debt_service);
+    ("CFAF", cfaf);
   ]
 
 (* Default Property Assumptions *)
@@ -243,13 +237,14 @@ let downtown_office : assumptions =
 
 (* Evaluation and Aggregation *)
 
-(* Build series for one property, then evaluate them all in a single
-   Formula.eval_many call so shared subexpressions are computed once. *)
+(* Build flows for one property, then evaluate them all in a single
+   Flow.eval_many call so shared subexpressions are computed once. *)
 let eval_property assumptions =
   let series_list = build_property assumptions in
   let labels = List.map fst series_list in
-  let series = List.map snd series_list in
-  let values = Formula.eval_many tl series in
+  let flows = List.map snd series_list in
+  let materialized = Flow.eval_many tl flows in
+  let values = List.map Flow.Materialized.to_array materialized in
   List.combine labels values
 
 let sum_arrays a b = Array.init (Array.length a) (fun i -> a.(i) +. b.(i))
@@ -397,9 +392,9 @@ let () =
   Statement.pp l ppf portfolio_statement;
 
   (* Dependency graph for a single property *)
-  let sample_series = build_property downtown_office |> List.map snd in
+  let sample_flows = build_property downtown_office |> List.map snd in
   let oc = open_out "model.dot" in
   let dot_ppf = Format.formatter_of_out_channel oc in
-  Formula.Deps.pp_dot dot_ppf sample_series;
+  Flow.Deps.pp_dot dot_ppf sample_flows;
   Format.pp_print_flush dot_ppf ();
   close_out oc
