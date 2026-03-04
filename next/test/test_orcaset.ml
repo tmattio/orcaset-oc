@@ -656,6 +656,10 @@ let test_schedule () =
   let e0_date, e0_val = List.hd events in
   check bool "event0 date" true (Date.equal adj.(0) e0_date);
   fl "event0 val" 100.0 e0_val;
+  (* to_events ~at:`End *)
+  let events_end = Schedule.to_events ~at:`End (fun i _p -> float_of_int (i + 1) *. 100.0) s in
+  let e0_date_end, _ = List.hd events_end in
+  check bool "event0 end date" true (Date.equal adj.(1) e0_date_end);
   (* to_string / pp *)
   let str = Schedule.to_string s in
   check bool "str has periods" true (has "4 periods" str);
