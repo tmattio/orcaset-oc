@@ -771,6 +771,41 @@ let test_flow () =
   check int "mat length" 3 (Formula.Materialized.length m);
   fl "mat get 0" 10.0 (Formula.Materialized.get m 0)
 
+(* Balance *)
+
+let test_balance () =
+  let evb msg tl b exp = fla msg exp (Balance.eval tl b) in
+  evb "const" tl3 (Balance.const 100.0) [| 100.0; 100.0; 100.0 |];
+  evb "of_array" tl3 (Balance.of_array [| 10.0; 20.0 |]) [| 10.0; 20.0; 0.0 |];
+  (* roll_forward: running sum *)
+  let flow = Flow.of_array [| 100.0; 200.0; 300.0 |] in
+  evb "roll_forward" tl3
+    (Balance.roll_forward ~init:1000.0 flow)
+    [| 1100.0; 1300.0; 1600.0 |];
+  (* roll_forward_with: custom accumulation *)
+  evb "roll_forward_with" tl3
+    (Balance.roll_forward_with ~init:1.0 (fun ~acc ~x -> acc *. x) flow)
+    [| 100.0; 20000.0; 6000000.0 |];
+  (* algebra *)
+  let a = Balance.of_array [| 10.0; 20.0; 30.0 |] in
+  let b = Balance.of_array [| 1.0; 2.0; 3.0 |] in
+  evb "add" tl3 (Balance.add a b) [| 11.0; 22.0; 33.0 |];
+  evb "sub" tl3 (Balance.sub a b) [| 9.0; 18.0; 27.0 |];
+  evb "scale" tl3 (Balance.scale 2.0 a) [| 20.0; 40.0; 60.0 |];
+  evb "map" tl3 (Balance.map (fun x -> x *. x) a) [| 100.0; 400.0; 900.0 |];
+  evb "map2" tl3 (Balance.map2 ( *. ) a b) [| 10.0; 40.0; 90.0 |];
+  (* cross-period *)
+  evb "prev" tl3 (Balance.prev a ~default:0.0) [| 0.0; 10.0; 20.0 |];
+  evb "at_period_start" tl3 (Balance.at_period_start a ~default:0.0) [| 0.0; 10.0; 20.0 |];
+  evb "at_period_end" tl3 (Balance.at_period_end () a) [| 10.0; 20.0; 30.0 |];
+  (* escape hatch roundtrip *)
+  let rt = Balance.of_formula (Balance.formula a) in
+  evb "roundtrip" tl3 rt [| 10.0; 20.0; 30.0 |];
+  (* eval_materialized *)
+  let m = Balance.eval_materialized tl3 a in
+  check int "mat length" 3 (Formula.Materialized.length m);
+  fl "mat get 1" 20.0 (Formula.Materialized.get m 1)
+
 (* Integration: coffee shop model *)
 
 let test_coffee_shop () =
@@ -863,6 +898,7 @@ let () =
       ("Statement", [ test_case "statement" `Quick test_statement ]);
       ("Deps", [ test_case "deps" `Quick test_deps ]);
       ("Flow", [ test_case "flow" `Quick test_flow ]);
+      ("Balance", [ test_case "balance" `Quick test_balance ]);
       ("Key", [ test_case "key" `Quick test_key ]);
       ("Scope", [ test_case "scope" `Quick test_scope ]);
       ("Integration", [ test_case "coffee shop" `Quick test_coffee_shop ]);

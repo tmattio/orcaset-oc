@@ -66,5 +66,8 @@ module Formula : module type of Formula
 module Flow : module type of Flow
 (** Interval quantities (revenue, expenses, cash movements). *)
 
+module Balance : module type of Balance
+(** Point-in-time quantities (cash balance, debt outstanding). *)
+
 module Statement : module type of Statement
 (** Hierarchical statement structure for financial reports. *)
