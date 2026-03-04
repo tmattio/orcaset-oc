@@ -183,6 +183,8 @@ val where : cond:'a t -> then_:'c t -> else_:'c t -> 'c t
     These operators introduce dependencies between periods and are the only way to express temporal
     relationships. *)
 
+(* CR: documentation here is pretty bad and goes into implementation detail that's not relevant?
+ Some implementation detail would probably useful, but not that. *)
 val prev : ?name:string -> 'c t -> default:float -> 'c t
 (** [prev s ~default] produces [default] at period 0 and [s.(i-1)] at period [i > 0]. This is the
     primitive for cross-period dependencies and the mechanism by which {!feedback} breaks
@@ -366,7 +368,9 @@ module Deps : sig
       ["sum"], ["prev"], ["scan"], ["where"], ["fixpoint"], ["var"]. *)
 
   type edge = { src : int; dst : int }
-  (** A directed edge from a node to one of its dependencies. *)
+  (** A directed edge from a dependency to a consumer. [src] is the depended-upon node and [dst] is
+      the node that uses it. In the collapsed graph, [src] is a named dependency and [dst] is a
+      named consumer. *)
 
   val graph : ?named_only:bool -> _ t list -> node list * edge list
   (** [graph roots] returns all nodes and edges reachable from [roots] by depth-first traversal.
