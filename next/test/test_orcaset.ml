@@ -777,10 +777,64 @@ let test_flow () =
   evf "roundtrip" tl3 f [| 10.0; 20.0; 30.0 |];
   (* named *)
   let _ = Flow.named "Revenue" a in
+  (* of_periods: exact match *)
+  let p0 = Timeline.get tl3 0 in
+  let p2 = Timeline.get tl3 2 in
+  evf "of_periods" tl3
+    (Flow.of_periods [ (p0, 100.0); (p2, 300.0) ])
+    [| 100.0; 0.0; 300.0 |];
+  (* of_periods: multiple values for same period sum *)
+  evf "of_periods sum" tl3
+    (Flow.of_periods [ (p0, 40.0); (p0, 60.0) ])
+    [| 100.0; 0.0; 0.0 |];
+  (* of_periods: unmatched period produces 0 *)
+  let foreign = Period.make ~start_date:(date 2099 1 1) ~end_date:(date 2099 2 1) in
+  evf "of_periods unmatched" tl3
+    (Flow.of_periods [ (foreign, 999.0) ])
+    [| 0.0; 0.0; 0.0 |];
+  (* of_events: out-of-range raises *)
+  invalid "Formula.of_events: event date 2024-01-01 is outside the timeline"
+    (fun () -> ignore (Flow.eval_values tl3
+      (Flow.of_events [ (date 2024 1 1, 100.0) ])));
   (* eval returns Materialized *)
   let m = Flow.eval tl3 a in
   check int "mat length" 3 (Flow.Materialized.length m);
-  fl "mat get 0" 10.0 (Flow.Materialized.get m 0)
+  fl "mat get 0" 10.0 (Flow.Materialized.get m 0);
+  (* Materialized accessors *)
+  check int "mat tl length" 3 (Timeline.length (Flow.Materialized.timeline m));
+  ds "mat period 0" "2025-01-01" (Period.start_date (Flow.Materialized.period m 0));
+  let pairs = Flow.Materialized.to_list m in
+  check int "mat to_list len" 3 (List.length pairs);
+  let sum = Flow.Materialized.fold (fun acc _p v -> acc +. v) 0.0 m in
+  fl "mat fold sum" 60.0 sum;
+  let count = ref 0 in
+  Flow.Materialized.iter (fun _p _v -> incr count) m;
+  check int "mat iter count" 3 !count;
+  (* to_array returns independent copy *)
+  let arr = Flow.Materialized.to_array m in
+  arr.(0) <- 999.0;
+  fl "mat copy safe" 10.0 (Flow.Materialized.get m 0);
+  (* Materialized.make length validation *)
+  invalid "Flow.Materialized.make: array length does not match timeline length"
+    (fun () -> ignore (Flow.Materialized.make tl3 [| 1.0; 2.0 |]));
+  (* accrue: full timeline *)
+  fl "accrue full" 60.0
+    (Flow.Materialized.accrue m
+       ~start_date:(date 2025 1 1) ~end_date:(date 2025 4 1));
+  (* accrue: single period *)
+  fl "accrue feb" 20.0
+    (Flow.Materialized.accrue m
+       ~start_date:(date 2025 2 1) ~end_date:(date 2025 3 1));
+  (* accrue: partial period pro-rata *)
+  let m1 = Flow.eval (Timeline.monthly ~start_date:(date 2025 1 1) ~n:1) (Flow.const 310.0) in
+  fl "accrue partial"
+    (310.0 *. 15.0 /. 31.0)
+    (Flow.Materialized.accrue m1
+       ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 16));
+  (* accrue: non-overlapping range returns 0.0 *)
+  fl "accrue outside" 0.0
+    (Flow.Materialized.accrue m
+       ~start_date:(date 2024 1 1) ~end_date:(date 2024 2 1))
 
 (* Balance *)
 
@@ -816,6 +870,43 @@ let test_balance () =
   let m = Balance.eval tl3 a in
   check int "mat length" 3 (Balance.Materialized.length m);
   fl "mat get 1" 20.0 (Balance.Materialized.get m 1);
+  (* Materialized accessors *)
+  check int "mat tl length" 3 (Timeline.length (Balance.Materialized.timeline m));
+  ds "mat period 1" "2025-02-01" (Period.start_date (Balance.Materialized.period m 1));
+  let pairs = Balance.Materialized.to_list m in
+  check int "mat to_list len" 3 (List.length pairs);
+  let sum = Balance.Materialized.fold (fun acc _p v -> acc +. v) 0.0 m in
+  fl "mat fold sum" 60.0 sum;
+  let count = ref 0 in
+  Balance.Materialized.iter (fun _p _v -> incr count) m;
+  check int "mat iter count" 3 !count;
+  (* to_array returns independent copy *)
+  let arr = Balance.Materialized.to_array m in
+  arr.(0) <- 999.0;
+  fl "mat copy safe" 10.0 (Balance.Materialized.get m 0);
+  (* Materialized.make length validation *)
+  invalid "Balance.Materialized.make: array length does not match timeline length"
+    (fun () -> ignore (Balance.Materialized.make tl3 [| 1.0; 2.0 |]));
+  (* at: Linear interpolation *)
+  let flow = Flow.of_array [| 100.0; 200.0; 300.0 |] in
+  let bal = Balance.roll_forward ~init:1000.0 flow in
+  let bal_m, flow_m = Balance.eval_with_flow tl3 bal ~flow in
+  fl "at jan1" 1000.0
+    (Balance.Materialized.at bal_m ~flow:flow_m (date 2025 1 1));
+  fl "at feb15"
+    (1100.0 +. (200.0 *. 14.0 /. 28.0))
+    (Balance.Materialized.at bal_m ~flow:flow_m (date 2025 2 15));
+  fl "at end" 1600.0
+    (Balance.Materialized.at bal_m ~flow:flow_m (date 2025 4 1));
+  (* at: Step interpolation pro-rates the balance value *)
+  fl "at step feb15"
+    (1300.0 *. 14.0 /. 28.0)
+    (Balance.Materialized.at ~interp:Step bal_m ~flow:flow_m (date 2025 2 15));
+  (* eval_with_flow: shared memoization produces correct values *)
+  fl "ewf bal 0" 1100.0 (Balance.Materialized.get bal_m 0);
+  fl "ewf flow 0" 100.0 (Flow.Materialized.get flow_m 0);
+  fl "ewf bal 2" 1600.0 (Balance.Materialized.get bal_m 2);
+  fl "ewf flow 2" 300.0 (Flow.Materialized.get flow_m 2);
   (* change: balance -> flow *)
   let bal = Balance.of_array [| 100.0; 150.0; 120.0 |] in
   let chg = Balance.change bal ~default:0.0 in
