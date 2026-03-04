@@ -84,6 +84,9 @@ val sub : 'c t -> 'c t -> 'c t
 val scale : float -> 'c t -> 'c t
 (** [scale k b] multiplies every value of [b] by [k]. *)
 
+val neg : 'c t -> 'c t
+(** [neg b] negates every value of [b]. *)
+
 val map : ?name:string -> (float -> float) -> 'c t -> 'c t
 (** [map f b] applies [f] to each value of [b]. *)
 
