@@ -339,7 +339,7 @@ let test_formula_fixpoint () =
     [| 200.0; 400.0; 800.0 |];
   (* divergence: x = 2x+1 *)
   raises "diverges"
-    (Formula.Convergence_error { series_name = Some "divergent"; period_index = 0; iterations = 5 })
+    (Formula.Convergence_error { formula_name = Some "divergent"; period_index = 0; iterations = 5 })
     (fun () ->
       Formula.eval tl3
         (Formula.fixpoint ~name:"divergent" ~max_iter:5 ~guess:0.0 (fun x ->
@@ -394,33 +394,38 @@ let test_formula_growth () =
 
 let test_formula_query () =
   let tl = Timeline.monthly ~start_date:(date 2025 1 1) ~n:3 in
+  let mk_mat arr = Formula.Materialized.make tl arr in
   (* interpolate *)
   fl "interp jan16"
     (310.0 *. 15.0 /. 31.0)
-    (Formula.Query.interpolate tl [| 310.0; 280.0; 310.0 |] (date 2025 1 16));
+    (Formula.Query.interpolate (mk_mat [| 310.0; 280.0; 310.0 |]) (date 2025 1 16));
   raises "interp outside"
     (Invalid_argument "Formula.Query.interpolate: date 2024-01-01 is outside the timeline")
-    (fun () -> Formula.Query.interpolate tl [| 100.0 |] (date 2024 1 1));
+    (fun () -> Formula.Query.interpolate (mk_mat [| 100.0; 280.0; 310.0 |]) (date 2024 1 1));
   (* accrue *)
-  let vals = [| 100.0; 200.0; 300.0 |] in
+  let vals = mk_mat [| 100.0; 200.0; 300.0 |] in
   fl "accrue full" 600.0
-    (Formula.Query.accrue tl vals ~start_date:(date 2025 1 1) ~end_date:(date 2025 4 1));
+    (Formula.Query.accrue vals ~start_date:(date 2025 1 1) ~end_date:(date 2025 4 1));
   fl "accrue feb" 200.0
-    (Formula.Query.accrue tl vals ~start_date:(date 2025 2 1) ~end_date:(date 2025 3 1));
+    (Formula.Query.accrue vals ~start_date:(date 2025 2 1) ~end_date:(date 2025 3 1));
+  let tl1 = Timeline.monthly ~start_date:(date 2025 1 1) ~n:1 in
   fl "accrue partial"
     (310.0 *. 15.0 /. 31.0)
-    (Formula.Query.accrue tl [| 310.0 |] ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 16));
+    (Formula.Query.accrue
+       (Formula.Materialized.make tl1 [| 310.0 |])
+       ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 16));
   (* balance_at *)
   let flow = Formula.of_array [| 100.0; 200.0; 300.0 |] in
   let balance = Formula.cumsum ~init:1000.0 flow in
-  let fv = Formula.eval tl flow and bv = Formula.eval tl balance in
-  fl "bal jan1" 1000.0 (Formula.Query.balance_at tl ~balance:bv ~flow:fv (date 2025 1 1));
+  let fm = Formula.eval_materialized tl flow in
+  let bm = Formula.eval_materialized tl balance in
+  fl "bal jan1" 1000.0 (Formula.Query.balance_at ~balance:bm ~flow:fm (date 2025 1 1));
   fl "bal feb15"
     (1100.0 +. (200.0 *. 14.0 /. 28.0))
-    (Formula.Query.balance_at tl ~balance:bv ~flow:fv (date 2025 2 15));
+    (Formula.Query.balance_at ~balance:bm ~flow:fm (date 2025 2 15));
   raises "bal outside"
-    (Invalid_argument "Formula.Query.balance_at: date 2024-01-01 is outside the timeline") (fun () ->
-      Formula.Query.balance_at tl ~balance:bv ~flow:fv (date 2024 1 1))
+    (Invalid_argument "Formula.Query.balance_at: date 2024-01-01 is outside the timeline")
+    (fun () -> Formula.Query.balance_at ~balance:bm ~flow:fm (date 2024 1 1))
 
 (* Materialized *)
 
@@ -524,7 +529,7 @@ let test_statement () =
        ~line_fn:(fun _ _ -> None)
        ~group_fn:(fun _ _ total -> total)
    with
-  | Some m -> fla "mat total" [| 10.0; 10.0; 10.0 |] (Formula.Materialized.values m)
+  | Some m -> fla "mat total" [| 10.0; 10.0; 10.0 |] (Formula.Materialized.to_array m)
   | None -> fail "expected materialized total")
 
 (* Deps *)

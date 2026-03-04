@@ -61,6 +61,11 @@ val init_flow : ?name:string -> (Period.t -> float) -> 'c t
       let days = Formula.init_flow (fun p -> Period.days p |> float_of_int)
     ]} *)
 
+(** {2:advanced_constructors Advanced constructors}
+
+    These constructors expose the period index or timeline. Prefer {!init_flow} for
+    period-based computations. *)
+
 val init : ?name:string -> (int -> Period.t -> float) -> 'c t
 (** [init f] is a formula that produces [f i period] at period [i]. The function receives both the
     zero-based index and the {!Period.t}. Prefer {!init_flow} unless the index is genuinely needed
@@ -266,13 +271,13 @@ val convert : rate:float -> 'c1 t -> 'c2 t
 
 (** {1:eval Evaluation} *)
 
-exception Cycle_error of { series_name : string option; period_index : int }
-(** Raised when evaluation detects a same-period dependency cycle. [series_name] is present when the
-    formula was given a name with {!named} or a [?name] parameter. *)
+exception Cycle_error of { formula_name : string option; period_index : int }
+(** Raised when evaluation detects a same-period dependency cycle. [formula_name] is present when
+    the formula was given a name with {!named} or a [?name] parameter. *)
 
-exception Convergence_error of { series_name : string option; period_index : int; iterations : int }
-(** Raised when {!fixpoint} does not converge. [iterations] is the number of iterations attempted.
-*)
+exception Convergence_error of { formula_name : string option; period_index : int; iterations : int }
+(** Raised when {!fixpoint} does not converge. [iterations] is the number of iterations
+    attempted. *)
 
 val eval : Timeline.t -> 'c t -> float array
 (** [eval tl s] materializes [s] against [tl], returning one [float] per period. Each formula
@@ -299,13 +304,18 @@ module Materialized : sig
   (** The type for materialized formula results. Each value is bound to its period. *)
 
   val make : Timeline.t -> float array -> 'c t
-  (** [make tl values] is a materialized result binding [values] to the periods of [tl]. *)
+  (** [make tl values] binds [values] to the periods of [tl].
+
+      Raises [Invalid_argument] if [Array.length values <> Timeline.length tl]. *)
 
   val timeline : _ t -> Timeline.t
   (** [timeline m] is the timeline [m] was evaluated against. *)
 
-  val values : _ t -> float array
-  (** [values m] is the raw array of values. Prefer {!get} and {!period} for safe access. *)
+  val to_array : _ t -> float array
+  (** [to_array m] is a fresh copy of the values array. *)
+
+  val unsafe_values : _ t -> float array
+  (** [unsafe_values m] is the backing values array. The caller must not mutate it. *)
 
   val length : _ t -> int
   (** [length m] is the number of values. *)
@@ -356,10 +366,8 @@ end
 
 (** {1:query Date queries}
 
-    Functions for probing materialized [float array] values at arbitrary dates. These operate on the
-    results of {!eval}, not on {!type-t} values directly.
-
-    Boundary periods are split using a {!Query.split_fn} that defaults to pro-rata by day count
+    Functions for probing {!Materialized.t} results at arbitrary dates. Boundary periods are split
+    using a {!Query.split_fn} that defaults to pro-rata by day count
     ({!Query.default_split_fn}). *)
 
 module Query : sig
@@ -374,34 +382,29 @@ module Query : sig
       where [split_date] falls [k] days after the start: [before = value *. k /. d]. Returns
       [(0.0, 0.0)] when the period has zero days. *)
 
-  val interpolate : ?split_fn:split_fn -> Timeline.t -> float array -> Date.t -> float
-  (** [interpolate tl values date] is the portion of the enclosing period's value that falls before
-      [date].
+  val interpolate : ?split_fn:split_fn -> _ Materialized.t -> Date.t -> float
+  (** [interpolate m date] is the portion of the enclosing period's value that falls before [date].
 
-      @raise Invalid_argument if [date] is outside [tl]. *)
+      Raises [Invalid_argument] if [date] is outside the timeline. *)
 
   val accrue :
-    ?split_fn:split_fn -> Timeline.t -> float array -> start_date:Date.t -> end_date:Date.t -> float
-  (** [accrue tl values ~start_date ~end_date] sums values over the date range. Periods fully
-      contained in the range contribute their whole value. Boundary periods are split: the first
-      period contributes its {e after} portion and the last period its {e before} portion. Returns
-      [0.0] if the date range does not overlap the timeline. *)
+    ?split_fn:split_fn -> _ Materialized.t -> start_date:Date.t -> end_date:Date.t -> float
+  (** [accrue m ~start_date ~end_date] sums values over the date range. Periods fully contained in
+      the range contribute their whole value. Boundary periods are split: the first period
+      contributes its {e after} portion and the last period its {e before} portion. Returns [0.0] if
+      the date range does not overlap the timeline. *)
 
   val balance_at :
-    ?split_fn:split_fn -> Timeline.t -> balance:float array -> flow:float array -> Date.t -> float
-  (** [balance_at tl ~balance ~flow date] is the interpolated balance at [date]. Computes the prior
+    ?split_fn:split_fn ->
+    balance:_ Materialized.t ->
+    flow:_ Materialized.t ->
+    Date.t ->
+    float
+  (** [balance_at ~balance ~flow date] is the interpolated balance at [date]. Computes the prior
       period's ending balance plus the portion of the current period's flow that falls before
       [date].
 
-      Typical usage with a {!scan}-based balance:
-
-      {[
-        let flow_v = Formula.eval tl flow in
-        let balance_v = Formula.eval tl balance in
-        Formula.Query.balance_at tl ~balance:balance_v ~flow:flow_v (Date.make 2025 7 1)
-      ]}
-
-      @raise Invalid_argument if [date] is outside [tl]. *)
+      Raises [Invalid_argument] if [date] is outside the timeline. *)
 end
 
 (** {1:deps Dependency graph}

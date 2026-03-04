@@ -173,11 +173,11 @@ let query_bench () =
   let tl = Timeline.monthly ~start_date:start ~n in
   let flow = Formula.const 100.0 in
   let balance = Formula.cumsum ~init:1000.0 flow in
-  let flow_v = Formula.eval tl flow in
-  let balance_v = Formula.eval tl balance in
+  let flow_m = Formula.eval_materialized tl flow in
+  let balance_m = Formula.eval_materialized tl balance in
   for m = 0 to n - 1 do
     let d = Date.add_months start (m + 1) in
-    ignore (Formula.Query.balance_at tl ~balance:balance_v ~flow:flow_v d)
+    ignore (Formula.Query.balance_at ~balance:balance_m ~flow:flow_m d)
   done
 
 let query_benchmarks = [ { name = "balance_at x120"; f = query_bench } ]

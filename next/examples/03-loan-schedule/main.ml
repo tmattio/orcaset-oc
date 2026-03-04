@@ -5,10 +5,11 @@
     minus interest).
 
     Key API patterns demonstrated:
-    - Mutual recursion between balance and interest via [Formula.delay] + [Formula.prev]
-    - Running balance with [Formula.cumsum]
-    - Day count fractions with [Formula.init] and [Daycount]
-    - Mid-period balance queries with [Formula.Query.balance_at] *)
+    - Typed balance/flow distinction with [Balance.t] and [Flow.t]
+    - Mutual recursion via [Balance.feedback]
+    - Running balance with [Balance.roll_forward]
+    - Day count fractions with [Flow.year_frac]
+    - Mid-period balance queries with [Balance.Materialized.at] *)
 
 open Orcaset2
 
@@ -33,38 +34,42 @@ let monthly_payment =
   loan_amount *. (r *. factor) /. (factor -. 1.0)
 
 (* Negative: payments are outflows from the borrower's perspective *)
-let total_pmt = Formula.const (-.monthly_payment)
+let total_pmt = Flow.const (-.monthly_payment)
 
 (* Year Fractions *)
 
-let year_fracs = Formula.year_frac ~name:"Year Fracs" Daycount.thirty_360_us
+let year_fracs = Flow.year_frac ~name:"Year Fracs" Daycount.thirty_360_us
 
 (* Loan Amortization *)
 
 (* Interest depends on prior balance, but balance depends on principal which
-   depends on interest. [feedback] breaks the cycle: the function receives the
-   prior period's balance, and returns the current period's balance definition.
+   depends on interest. [Balance.feedback] breaks the cycle: the function
+   receives the prior period's balance, and returns the current period's balance
+   definition.
 
    Recurrence:
      interest.(i)  = -balance.(i-1) * annual_rate * yf.(i)
      principal.(i) = total_pmt.(i) - interest.(i)
      balance.(i)   = balance.(i-1) + principal.(i) *)
 let balance, (interest_pmt, principal_pmt) =
-  Formula.feedback ~name:"Balance" ~default:loan_amount (fun prev_bal ->
+  Balance.feedback ~name:"Balance" ~default:loan_amount (fun prev_bal ->
       let interest =
-        Formula.named "Interest" (Formula.scale (-.annual_rate) (Formula.mul prev_bal year_fracs))
+        Flow.of_formula
+          (Formula.named "Interest"
+             (Formula.scale (-.annual_rate)
+                (Formula.mul (Balance.formula prev_bal) (Flow.formula year_fracs))))
       in
-      let principal = Formula.named "Principal" (Formula.sub total_pmt interest) in
-      let balance = Formula.cumsum ~init:loan_amount principal in
+      let principal = Flow.named "Principal" (Flow.sub total_pmt interest) in
+      let balance = Balance.roll_forward ~init:loan_amount principal in
       (balance, (balance, (interest, principal))))
 
 (* Output *)
 
 let () =
-  let balance_values = Formula.eval tl balance in
-  let interest_values = Formula.eval tl interest_pmt in
-  let principal_values = Formula.eval tl principal_pmt in
-  let total_values = Formula.eval tl total_pmt in
+  let balance_values = Balance.eval tl balance in
+  let interest_values = Flow.eval tl interest_pmt in
+  let principal_values = Flow.eval tl principal_pmt in
+  let total_values = Flow.eval tl total_pmt in
 
   Printf.printf "=== Fixed-Rate Amortizing Loan Schedule ===\n";
   Printf.printf "Loan Amount:     $%.2f\n" loan_amount;
@@ -87,12 +92,14 @@ let () =
   (* Formula.Query.balance_at interpolates the balance at any date, even
      mid-period, by pro-rating the current period's principal flow *)
   Printf.printf "=== Loan Balance Queries ===\n";
+  let balance_m = Formula.Materialized.make tl balance_values in
+  let principal_m = Formula.Materialized.make tl principal_values in
   let query_dates =
     [ Date.make 2025 1 1; Date.make 2025 1 15; Date.make 2028 2 4; Date.make 2040 1 7 ]
   in
   List.iter
     (fun d ->
-      let bal = Formula.Query.balance_at tl ~balance:balance_values ~flow:principal_values d in
+      let bal = Formula.Query.balance_at ~balance:balance_m ~flow:principal_m d in
       Printf.printf "Balance on %s: $%.2f\n" (Date.to_string d) bal)
     query_dates;
   Printf.printf "\n";
@@ -116,6 +123,7 @@ let () =
   (* Dependency graph *)
   let oc = open_out "model.dot" in
   let ppf = Format.formatter_of_out_channel oc in
-  Formula.Deps.pp_dot ppf [ balance; interest_pmt; principal_pmt ];
+  Formula.Deps.pp_dot ppf
+    [ Balance.formula balance; Flow.formula interest_pmt; Flow.formula principal_pmt ];
   Format.pp_print_flush ppf ();
   close_out oc

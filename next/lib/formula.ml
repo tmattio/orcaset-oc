@@ -224,8 +224,8 @@ let convert ~rate s = scale rate s
    only reads its own earlier periods, so backward references always
    decrease the period index. *)
 
-exception Cycle_error of { series_name : string option; period_index : int }
-exception Convergence_error of { series_name : string option; period_index : int; iterations : int }
+exception Cycle_error of { formula_name : string option; period_index : int }
+exception Convergence_error of { formula_name : string option; period_index : int; iterations : int }
 
 type cell_state = In_progress | Done of float
 type eval_ctx = { tl : Timeline.t; n : int; memo : (int, cell_state) Hashtbl.t }
@@ -279,7 +279,7 @@ and eval_cell ctx (s : inner) i =
       let key = (s.id * ctx.n) + i in
       match Hashtbl.find_opt ctx.memo key with
       | Some (Done v) -> v
-      | Some In_progress -> raise (Cycle_error { series_name = s.name; period_index = i })
+      | Some In_progress -> raise (Cycle_error { formula_name = s.name; period_index = i })
       | None ->
           Hashtbl.replace ctx.memo key In_progress;
           let v = compute ctx s i in
@@ -315,7 +315,7 @@ and compute ctx s i =
       let rec iterate x iter =
         if iter >= max_iter then
           raise
-            (Convergence_error { series_name = s.name; period_index = i; iterations = max_iter })
+            (Convergence_error { formula_name = s.name; period_index = i; iterations = max_iter })
         else begin
           r := x;
           invalidate_period ctx var i;
@@ -349,9 +349,19 @@ let eval_many tl ss =
 module Materialized = struct
   type 'c t = { timeline : Timeline.t; values : float array }
 
-  let make timeline values = { timeline; values }
+  let make timeline values =
+    let tl_len = Timeline.length timeline in
+    let arr_len = Array.length values in
+    if arr_len <> tl_len then
+      invalid_arg
+        (Printf.sprintf
+           "Formula.Materialized.make: array length %d does not match timeline length %d" arr_len
+           tl_len);
+    { timeline; values }
+
   let timeline m = m.timeline
-  let values m = m.values
+  let to_array m = Array.copy m.values
+  let unsafe_values m = m.values
   let length m = Array.length m.values
   let get m i = m.values.(i)
   let period m i = Timeline.get m.timeline i
@@ -406,7 +416,8 @@ module Query = struct
     let end_date = Timeline.period_end tl i in
     split_fn ~start_date ~end_date ~split_date ~value
 
-  let interpolate ?(split_fn = default_split_fn) tl values date =
+  let interpolate ?(split_fn = default_split_fn) (m : _ Materialized.t) date =
+    let tl = m.timeline and values = m.values in
     match Timeline.find_index tl date with
     | None ->
         invalid_arg
@@ -416,12 +427,8 @@ module Query = struct
         let before, _ = call_split_fn split_fn tl i ~split_date:date ~value:values.(i) in
         before
 
-  (* Four cases for how a period overlaps [start_date, end_date):
-       fully inside  -> take the whole value
-       partial left  -> starts before range; take the "after" portion
-       partial right -> ends after range; take the "before" portion
-       spans both    -> split twice: at start_date then at end_date *)
-  let accrue ?(split_fn = default_split_fn) tl values ~start_date ~end_date =
+  let accrue ?(split_fn = default_split_fn) (m : _ Materialized.t) ~start_date ~end_date =
+    let tl = m.timeline and values = m.values in
     let n = Timeline.length tl in
     let lo = match Timeline.find_index tl start_date with Some i -> i | None -> 0 in
     let hi =
@@ -454,7 +461,10 @@ module Query = struct
     done;
     !total
 
-  let balance_at ?(split_fn = default_split_fn) tl ~balance ~flow date =
+  let balance_at ?(split_fn = default_split_fn) ~(balance : _ Materialized.t)
+      ~(flow : _ Materialized.t) date =
+    let tl = balance.timeline in
+    let balance = balance.values and flow = flow.values in
     match Timeline.find_index tl date with
     | None ->
         invalid_arg
