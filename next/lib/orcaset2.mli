@@ -17,10 +17,6 @@
     + Organize into hierarchical {!Statement}s for structured
       output.
 
-    For advanced grid-local operations ({!Formula.map},
-    {!Formula.mul}, {!Formula.prev}, {!Formula.feedback},
-    {!Formula.fixpoint}), use {!Formula}.
-
     {1 Quick start}
 
     {[
@@ -53,8 +49,7 @@
     {!modules:
     Date Period Daycount Calendar Timeline Schedule
     Key Scope
-    Flow Balance Statement
-    Formula} *)
+    Flow Balance Statement} *)
 
 module Date : module type of Date
 (** Gregorian calendar dates. *)
@@ -89,10 +84,3 @@ module Balance : module type of Balance
 
 module Statement : module type of Statement
 (** Hierarchical statement structure for financial reports. *)
-
-module Formula : module type of Formula
-(** {b Advanced.} Grid-local formula engine for pointwise
-    operations ({!Formula.map}, {!Formula.mul}) and sequential
-    recurrences ({!Formula.prev}, {!Formula.scan},
-    {!Formula.feedback}, {!Formula.fixpoint}). Most users should
-    prefer {!Flow} and {!Balance}. *)

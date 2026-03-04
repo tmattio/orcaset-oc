@@ -11,7 +11,6 @@ module Timeline = Timeline
 module Schedule = Schedule
 module Key = Key
 module Scope = Scope
-module Formula = Formula
 module Flow = Flow
 module Balance = Balance
 module Statement = Statement
