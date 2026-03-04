@@ -117,7 +117,9 @@ val of_events : ?name:string -> (Date.t * float) list -> 'c t
 (** [of_events events] distributes sparse [(date, value)] pairs into periods. Each event is placed
     in the period found by {!Timeline.find_index} (start-inclusive, end-exclusive; last period
     end-inclusive). Multiple events in the same period are summed. Periods with no events produce
-    [0.0]. Events outside the timeline are silently dropped.
+    [0.0].
+
+    Raises [Invalid_argument] if any event date falls outside the timeline.
 
     {b Performance.} Events are binned once per evaluation in O(events {e *} log periods) using
     binary search; subsequent period lookups are O(1). *)
@@ -366,8 +368,11 @@ end
 
 (** {1:query Date queries}
 
-    Functions for probing {!Materialized.t} results at arbitrary dates. Boundary periods are split
-    using a {!Query.split_fn} that defaults to pro-rata by day count
+    Low-level functions for probing timeline-aligned values at arbitrary dates. These operate on raw
+    {!Timeline.t} and [float array] pairs. For typed wrappers, use {!Flow.Materialized.accrue} and
+    {!Balance.Materialized.at}.
+
+    Boundary periods are split using a {!Query.split_fn} that defaults to pro-rata by day count
     ({!Query.default_split_fn}). *)
 
 module Query : sig
@@ -382,25 +387,32 @@ module Query : sig
       where [split_date] falls [k] days after the start: [before = value *. k /. d]. Returns
       [(0.0, 0.0)] when the period has zero days. *)
 
-  val interpolate : ?split_fn:split_fn -> _ Materialized.t -> Date.t -> float
-  (** [interpolate m date] is the portion of the enclosing period's value that falls before [date].
+  val interpolate : ?split_fn:split_fn -> Timeline.t -> float array -> Date.t -> float
+  (** [interpolate tl values date] is the portion of the enclosing period's value that falls before
+      [date].
 
       Raises [Invalid_argument] if [date] is outside the timeline. *)
 
   val accrue :
-    ?split_fn:split_fn -> _ Materialized.t -> start_date:Date.t -> end_date:Date.t -> float
-  (** [accrue m ~start_date ~end_date] sums values over the date range. Periods fully contained in
-      the range contribute their whole value. Boundary periods are split: the first period
-      contributes its {e after} portion and the last period its {e before} portion. Returns [0.0] if
-      the date range does not overlap the timeline. *)
+    ?split_fn:split_fn ->
+    Timeline.t ->
+    float array ->
+    start_date:Date.t ->
+    end_date:Date.t ->
+    float
+  (** [accrue tl values ~start_date ~end_date] sums values over the date range. Periods fully
+      contained in the range contribute their whole value. Boundary periods are split: the first
+      period contributes its {e after} portion and the last period its {e before} portion. Returns
+      [0.0] if the date range does not overlap the timeline. *)
 
   val balance_at :
     ?split_fn:split_fn ->
-    balance:_ Materialized.t ->
-    flow:_ Materialized.t ->
+    Timeline.t ->
+    balance:float array ->
+    flow:float array ->
     Date.t ->
     float
-  (** [balance_at ~balance ~flow date] is the interpolated balance at [date]. Computes the prior
+  (** [balance_at tl ~balance ~flow date] is the interpolated balance at [date]. Computes the prior
       period's ending balance plus the portion of the current period's flow that falls before
       [date].
 

@@ -72,7 +72,7 @@ let loan_balance, (interest_pmt, principal_pmt) =
 (* Bridge quarterly loan events into the monthly model. *)
 
 let bridge_to_monthly name flow =
-  let vals = Flow.eval loan_tl flow in
+  let vals = Flow.eval_values loan_tl flow in
   Flow.of_events ~name (Schedule.to_events ~at:`End (fun i _p -> vals.(i)) loan_sched)
 
 let monthly_interest = bridge_to_monthly "Loan Interest" interest_pmt
@@ -132,9 +132,9 @@ let () =
   (* Loan amortization on loan timeline *)
   Printf.printf "LOAN AMORTIZATION (first 8 quarters)\n";
   Printf.printf "=====================================\n";
-  let bal_v = Balance.eval loan_tl loan_balance in
-  let int_v = Flow.eval loan_tl interest_pmt in
-  let pri_v = Flow.eval loan_tl principal_pmt in
+  let bal_v = Balance.eval_values loan_tl loan_balance in
+  let int_v = Flow.eval_values loan_tl interest_pmt in
+  let pri_v = Flow.eval_values loan_tl principal_pmt in
   Printf.printf "%3s  %12s  %14s  %12s  %12s  %14s\n" "Q" "Pay Date" "Beg Balance" "Interest"
     "Principal" "End Balance";
   Printf.printf "%s\n" (String.make 75 '-');

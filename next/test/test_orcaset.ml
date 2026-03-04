@@ -230,15 +230,14 @@ let test_formula_constructors () =
     (Formula.of_events [ (date 2025 1 10, 100.0); (date 2025 1 20, 50.0); (date 2025 3 5, 200.0) ])
     [| 150.0; 0.0; 200.0 |];
   ev "boundary" tl3 (Formula.of_events [ (date 2025 2 1, 100.0) ]) [| 0.0; 100.0; 0.0 |];
-  ev "outside drop" tl3
-    (Formula.of_events [ (date 2024 1 1, 999.0); (date 2025 1 15, 100.0); (date 2026 1 1, 999.0) ])
-    [| 100.0; 0.0; 0.0 |];
-  (* of_events: same series evaluated against two different timelines *)
-  let events = Formula.of_events [ (date 2025 1 15, 100.0); (date 2025 4 10, 200.0) ] in
-  let tl_short = Timeline.monthly ~start_date:(date 2025 1 1) ~n:2 in
+  invalid "Formula.of_events: event date 2024-01-01 is outside the timeline"
+    (fun () -> ignore (Formula.eval tl3
+      (Formula.of_events [ (date 2024 1 1, 999.0); (date 2025 1 15, 100.0) ])));
+  (* of_events: evaluated against a timeline that contains all events *)
   let tl_long = Timeline.monthly ~start_date:(date 2025 1 1) ~n:6 in
-  ev "cross-tl short" tl_short events [| 100.0; 0.0 |];
-  ev "cross-tl long" tl_long events [| 100.0; 0.0; 0.0; 200.0; 0.0; 0.0 |]
+  ev "cross-tl long" tl_long
+    (Formula.of_events [ (date 2025 1 15, 100.0); (date 2025 4 10, 200.0) ])
+    [| 100.0; 0.0; 0.0; 200.0; 0.0; 0.0 |]
 
 (* Formula: pointwise *)
 
@@ -394,38 +393,36 @@ let test_formula_growth () =
 
 let test_formula_query () =
   let tl = Timeline.monthly ~start_date:(date 2025 1 1) ~n:3 in
-  let mk_mat arr = Formula.Materialized.make tl arr in
   (* interpolate *)
   fl "interp jan16"
     (310.0 *. 15.0 /. 31.0)
-    (Formula.Query.interpolate (mk_mat [| 310.0; 280.0; 310.0 |]) (date 2025 1 16));
+    (Formula.Query.interpolate tl [| 310.0; 280.0; 310.0 |] (date 2025 1 16));
   raises "interp outside"
     (Invalid_argument "Formula.Query.interpolate: date 2024-01-01 is outside the timeline")
-    (fun () -> Formula.Query.interpolate (mk_mat [| 100.0; 280.0; 310.0 |]) (date 2024 1 1));
+    (fun () -> Formula.Query.interpolate tl [| 100.0; 280.0; 310.0 |] (date 2024 1 1));
   (* accrue *)
-  let vals = mk_mat [| 100.0; 200.0; 300.0 |] in
+  let vals = [| 100.0; 200.0; 300.0 |] in
   fl "accrue full" 600.0
-    (Formula.Query.accrue vals ~start_date:(date 2025 1 1) ~end_date:(date 2025 4 1));
+    (Formula.Query.accrue tl vals ~start_date:(date 2025 1 1) ~end_date:(date 2025 4 1));
   fl "accrue feb" 200.0
-    (Formula.Query.accrue vals ~start_date:(date 2025 2 1) ~end_date:(date 2025 3 1));
+    (Formula.Query.accrue tl vals ~start_date:(date 2025 2 1) ~end_date:(date 2025 3 1));
   let tl1 = Timeline.monthly ~start_date:(date 2025 1 1) ~n:1 in
   fl "accrue partial"
     (310.0 *. 15.0 /. 31.0)
-    (Formula.Query.accrue
-       (Formula.Materialized.make tl1 [| 310.0 |])
+    (Formula.Query.accrue tl1 [| 310.0 |]
        ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 16));
   (* balance_at *)
   let flow = Formula.of_array [| 100.0; 200.0; 300.0 |] in
   let balance = Formula.cumsum ~init:1000.0 flow in
-  let fm = Formula.eval_materialized tl flow in
-  let bm = Formula.eval_materialized tl balance in
-  fl "bal jan1" 1000.0 (Formula.Query.balance_at ~balance:bm ~flow:fm (date 2025 1 1));
+  let fv = Formula.eval tl flow in
+  let bv = Formula.eval tl balance in
+  fl "bal jan1" 1000.0 (Formula.Query.balance_at tl ~balance:bv ~flow:fv (date 2025 1 1));
   fl "bal feb15"
     (1100.0 +. (200.0 *. 14.0 /. 28.0))
-    (Formula.Query.balance_at ~balance:bm ~flow:fm (date 2025 2 15));
+    (Formula.Query.balance_at tl ~balance:bv ~flow:fv (date 2025 2 15));
   raises "bal outside"
     (Invalid_argument "Formula.Query.balance_at: date 2024-01-01 is outside the timeline")
-    (fun () -> Formula.Query.balance_at ~balance:bm ~flow:fm (date 2024 1 1))
+    (fun () -> Formula.Query.balance_at tl ~balance:bv ~flow:fv (date 2024 1 1))
 
 (* Materialized *)
 
@@ -758,7 +755,7 @@ let test_schedule () =
 (* Flow *)
 
 let test_flow () =
-  let evf msg tl f exp = fla msg exp (Flow.eval tl f) in
+  let evf msg tl f exp = fla msg exp (Flow.eval_values tl f) in
   evf "const" tl3 (Flow.const 42.0) [| 42.0; 42.0; 42.0 |];
   evf "of_array" tl3 (Flow.of_array [| 1.0; 2.0 |]) [| 1.0; 2.0; 0.0 |];
   evf "init" tl3
@@ -780,15 +777,15 @@ let test_flow () =
   evf "roundtrip" tl3 f [| 10.0; 20.0; 30.0 |];
   (* named *)
   let _ = Flow.named "Revenue" a in
-  (* eval_materialized *)
-  let m = Flow.eval_materialized tl3 a in
-  check int "mat length" 3 (Formula.Materialized.length m);
-  fl "mat get 0" 10.0 (Formula.Materialized.get m 0)
+  (* eval returns Materialized *)
+  let m = Flow.eval tl3 a in
+  check int "mat length" 3 (Flow.Materialized.length m);
+  fl "mat get 0" 10.0 (Flow.Materialized.get m 0)
 
 (* Balance *)
 
 let test_balance () =
-  let evb msg tl b exp = fla msg exp (Balance.eval tl b) in
+  let evb msg tl b exp = fla msg exp (Balance.eval_values tl b) in
   evb "const" tl3 (Balance.const 100.0) [| 100.0; 100.0; 100.0 |];
   evb "of_array" tl3 (Balance.of_array [| 10.0; 20.0 |]) [| 10.0; 20.0; 0.0 |];
   (* roll_forward: running sum *)
@@ -811,23 +808,23 @@ let test_balance () =
   (* cross-period *)
   evb "prev" tl3 (Balance.prev a ~default:0.0) [| 0.0; 10.0; 20.0 |];
   evb "at_period_start" tl3 (Balance.at_period_start a ~default:0.0) [| 0.0; 10.0; 20.0 |];
-  evb "at_period_end" tl3 (Balance.at_period_end () a) [| 10.0; 20.0; 30.0 |];
+  evb "at_period_end" tl3 (Balance.at_period_end a) [| 10.0; 20.0; 30.0 |];
   (* escape hatch roundtrip *)
   let rt = Balance.of_formula (Balance.formula a) in
   evb "roundtrip" tl3 rt [| 10.0; 20.0; 30.0 |];
-  (* eval_materialized *)
-  let m = Balance.eval_materialized tl3 a in
-  check int "mat length" 3 (Formula.Materialized.length m);
-  fl "mat get 1" 20.0 (Formula.Materialized.get m 1);
+  (* eval returns Materialized *)
+  let m = Balance.eval tl3 a in
+  check int "mat length" 3 (Balance.Materialized.length m);
+  fl "mat get 1" 20.0 (Balance.Materialized.get m 1);
   (* change: balance -> flow *)
   let bal = Balance.of_array [| 100.0; 150.0; 120.0 |] in
   let chg = Balance.change bal ~default:0.0 in
-  fla "change" [| 100.0; 50.0; -30.0 |] (Flow.eval tl3 chg);
+  fla "change" [| 100.0; 50.0; -30.0 |] (Flow.eval_values tl3 chg);
   (* roundtrip: roll_forward (change b) ~ b when default = init *)
   let flow2 = Flow.of_array [| 10.0; 20.0; 30.0 |] in
   let bal2 = Balance.roll_forward ~init:0.0 flow2 in
   let chg2 = Balance.change bal2 ~default:0.0 in
-  fla "roundtrip change" [| 10.0; 20.0; 30.0 |] (Flow.eval tl3 chg2);
+  fla "roundtrip change" [| 10.0; 20.0; 30.0 |] (Flow.eval_values tl3 chg2);
   (* feedback: interest accrual on previous balance *)
   let balance2, interest =
     Balance.feedback ~default:100.0 (fun prev_bal ->
@@ -837,8 +834,8 @@ let test_balance () =
         let balance = Balance.roll_forward ~init:100.0 interest in
         (balance, (balance, interest)))
   in
-  let vb2 = Balance.eval tl3 balance2 in
-  let vi = Flow.eval tl3 interest in
+  let vb2 = Balance.eval_values tl3 balance2 in
+  let vi = Flow.eval_values tl3 interest in
   fl "fb bal[0]" 101.0 vb2.(0);
   fl "fb int[0]" 1.0 vi.(0);
   fl "fb int[1]" 1.01 vi.(1);
@@ -850,7 +847,7 @@ let test_balance () =
         Balance.map2 (fun bc c -> ltc *. (bc +. rate *. c))
           base_cost commitment)
   in
-  let lv = Balance.eval tl3 loan in
+  let lv = Balance.eval_values tl3 loan in
   let expected i =
     let bc = [| 1000.0; 2000.0; 3000.0 |].(i) in
     ltc *. bc /. (1.0 -. (ltc *. rate))

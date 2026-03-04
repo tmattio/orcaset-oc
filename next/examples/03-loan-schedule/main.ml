@@ -66,10 +66,11 @@ let balance, (interest_pmt, principal_pmt) =
 (* Output *)
 
 let () =
-  let balance_values = Balance.eval tl balance in
-  let interest_values = Flow.eval tl interest_pmt in
-  let principal_values = Flow.eval tl principal_pmt in
-  let total_values = Flow.eval tl total_pmt in
+  let balance_m, principal_m = Balance.eval_with_flow tl balance ~flow:principal_pmt in
+  let balance_values = Balance.Materialized.unsafe_values balance_m in
+  let interest_values = Flow.eval_values tl interest_pmt in
+  let principal_values = Flow.Materialized.unsafe_values principal_m in
+  let total_values = Flow.eval_values tl total_pmt in
 
   Printf.printf "=== Fixed-Rate Amortizing Loan Schedule ===\n";
   Printf.printf "Loan Amount:     $%.2f\n" loan_amount;
@@ -89,17 +90,15 @@ let () =
   Printf.printf "Difference:            $%.2f\n" (loan_amount -. total_principal);
   Printf.printf "\n";
 
-  (* Formula.Query.balance_at interpolates the balance at any date, even
+  (* Balance.Materialized.at interpolates the balance at any date, even
      mid-period, by pro-rating the current period's principal flow *)
   Printf.printf "=== Loan Balance Queries ===\n";
-  let balance_m = Formula.Materialized.make tl balance_values in
-  let principal_m = Formula.Materialized.make tl principal_values in
   let query_dates =
     [ Date.make 2025 1 1; Date.make 2025 1 15; Date.make 2028 2 4; Date.make 2040 1 7 ]
   in
   List.iter
     (fun d ->
-      let bal = Formula.Query.balance_at ~balance:balance_m ~flow:principal_m d in
+      let bal = Balance.Materialized.at balance_m ~flow:principal_m d in
       Printf.printf "Balance on %s: $%.2f\n" (Date.to_string d) bal)
     query_dates;
   Printf.printf "\n";

@@ -7,7 +7,7 @@
 
     A {!type-t} represents a snapshot value at a date: cash balance,
     debt outstanding, inventory level. The natural query is "what is
-    the value at date [d]?", not "how much over an interval?".
+    the value at date [d]?", answered by {!Materialized.at}.
 
     Unlike {!Flow.t}, balances support {!map} and {!map2} since
     pointwise transforms on snapshots preserve the "value at a date"
@@ -22,10 +22,6 @@ type 'c t
 
 val const : ?name:string -> float -> 'c t
 (** [const v] is a balance that produces [v] at every period. *)
-
-val of_array : ?name:string -> float array -> 'c t
-(** [of_array arr] is a balance that produces [arr.(i)] at
-    period [i]. Periods beyond [Array.length arr] produce [0.0]. *)
 
 val init : ?name:string -> (Period.t -> float) -> 'c t
 (** [init f] is a balance that produces [f period] at each period. *)
@@ -84,10 +80,9 @@ val at_period_start : ?name:string -> 'c t -> default:float -> 'c t
     balance at the start of a period is the end-of-previous-period
     value. *)
 
-val at_period_end : 'a -> 'c t -> 'c t
-(** [at_period_end _name b] is [b] (identity). A balance naturally
-    represents the end-of-period value. The first argument is
-    ignored; it exists for symmetry with {!at_period_start}. *)
+val at_period_end : 'c t -> 'c t
+(** [at_period_end b] is [b] (identity). A balance naturally
+    represents the end-of-period value. *)
 
 (** {1:to_flow Bridge to Flow} *)
 
@@ -156,12 +151,99 @@ val of_formula : 'c Formula.t -> 'c t
 (** [of_formula s] wraps [s] as a balance. The caller asserts
     that [s] has balance semantics (point-in-time quantities). *)
 
+val of_array : ?name:string -> float array -> 'c t
+(** [of_array arr] is a balance that produces [arr.(i)] at
+    period [i]. Periods beyond [Array.length arr] produce [0.0].
+
+    Prefer {!init} or {!roll_forward} for new code. *)
+
 (** {1:eval Evaluation} *)
 
-val eval : Timeline.t -> 'c t -> float array
-(** [eval tl b] materializes [b] against [tl]. *)
+(** {2:materialized Materialized results}
 
-val eval_materialized :
-  Timeline.t -> 'c t -> 'c Formula.Materialized.t
-(** [eval_materialized tl b] is like {!eval} but returns a
-    {!Formula.Materialized.t} with period bindings attached. *)
+    Evaluation results that keep period bindings attached,
+    preventing accidental misalignment between values and their
+    periods. *)
+
+module Materialized : sig
+  type 'c t
+  (** The type for materialized balance results. Each value is
+      bound to its period. *)
+
+  type interp =
+    | Step    (** End-of-previous-period balance. *)
+    | Linear  (** Prior balance + pro-rated current-period flow. *)
+  (** The type for point-in-time interpolation methods. *)
+
+  val make : Timeline.t -> float array -> 'c t
+  (** [make tl values] binds [values] to the periods of [tl].
+
+      Raises [Invalid_argument] if
+      [Array.length values <> Timeline.length tl]. *)
+
+  val timeline : _ t -> Timeline.t
+  (** [timeline m] is the timeline [m] was evaluated against. *)
+
+  val to_array : _ t -> float array
+  (** [to_array m] is a fresh copy of the values array. *)
+
+  val unsafe_values : _ t -> float array
+  (** [unsafe_values m] is the backing values array. The caller
+      must not mutate it. *)
+
+  val length : _ t -> int
+  (** [length m] is the number of values. *)
+
+  val get : _ t -> int -> float
+  (** [get m i] is the value at period [i]. *)
+
+  val period : _ t -> int -> Period.t
+  (** [period m i] is the period at index [i]. *)
+
+  val to_list : _ t -> (Period.t * float) list
+  (** [to_list m] is the list of [(period, value)] pairs. *)
+
+  val iter : (Period.t -> float -> unit) -> _ t -> unit
+  (** [iter f m] applies [f period value] to each element. *)
+
+  val fold : ('a -> Period.t -> float -> 'a) -> 'a -> _ t -> 'a
+  (** [fold f init m] folds [f] over each [(period, value)]
+      pair. *)
+
+  val at :
+    ?interp:interp ->
+    ?split_fn:Formula.Query.split_fn ->
+    _ t ->
+    flow:_ Flow.Materialized.t ->
+    Date.t ->
+    float
+  (** [at m ~flow date] is the interpolated balance at [date].
+
+      When [interp] is [Linear] (the default), computes the prior
+      period's ending balance plus the portion of the current
+      period's flow that falls before [date].
+
+      When [interp] is [Step], returns the end-of-previous-period
+      balance (the flow is ignored).
+
+      Raises [Invalid_argument] if [date] is outside the
+      timeline. *)
+end
+
+val eval : Timeline.t -> 'c t -> 'c Materialized.t
+(** [eval tl b] materializes [b] against [tl], returning a
+    {!Materialized.t} with period bindings attached. *)
+
+val eval_with_flow :
+  Timeline.t ->
+  'c t ->
+  flow:'c Flow.t ->
+  'c Materialized.t * 'c Flow.Materialized.t
+(** [eval_with_flow tl b ~flow] evaluates [b] and [flow] in a
+    shared memoization context, returning both materialized
+    results. The companion flow enables {!Materialized.at} with
+    [Linear] interpolation. *)
+
+val eval_values : Timeline.t -> 'c t -> float array
+(** [eval_values tl b] materializes [b] against [tl] as a raw
+    [float array]. Expert use; prefer {!eval}. *)

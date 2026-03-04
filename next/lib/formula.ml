@@ -201,7 +201,11 @@ let of_events ?name events =
                  (fun (d, v) ->
                    match Timeline.find_index tl d with
                    | Some idx -> bins.(idx) <- bins.(idx) +. v
-                   | None -> ())
+                   | None ->
+                       invalid_arg
+                         (Printf.sprintf
+                            "Formula.of_events: event date %s is outside the timeline"
+                            (Date.to_string d)))
                  events;
                cache := Some (tl, bins);
                bins
@@ -416,8 +420,7 @@ module Query = struct
     let end_date = Timeline.period_end tl i in
     split_fn ~start_date ~end_date ~split_date ~value
 
-  let interpolate ?(split_fn = default_split_fn) (m : _ Materialized.t) date =
-    let tl = m.timeline and values = m.values in
+  let interpolate ?(split_fn = default_split_fn) tl values date =
     match Timeline.find_index tl date with
     | None ->
         invalid_arg
@@ -427,8 +430,7 @@ module Query = struct
         let before, _ = call_split_fn split_fn tl i ~split_date:date ~value:values.(i) in
         before
 
-  let accrue ?(split_fn = default_split_fn) (m : _ Materialized.t) ~start_date ~end_date =
-    let tl = m.timeline and values = m.values in
+  let accrue ?(split_fn = default_split_fn) tl values ~start_date ~end_date =
     let n = Timeline.length tl in
     let lo = match Timeline.find_index tl start_date with Some i -> i | None -> 0 in
     let hi =
@@ -461,10 +463,7 @@ module Query = struct
     done;
     !total
 
-  let balance_at ?(split_fn = default_split_fn) ~(balance : _ Materialized.t)
-      ~(flow : _ Materialized.t) date =
-    let tl = balance.timeline in
-    let balance = balance.values and flow = flow.values in
+  let balance_at ?(split_fn = default_split_fn) tl ~balance ~flow date =
     match Timeline.find_index tl date with
     | None ->
         invalid_arg
