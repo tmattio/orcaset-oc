@@ -57,6 +57,9 @@ module Schedule : module type of Schedule
 module Key : module type of Key
 (** Unique line-item identifiers. *)
 
+module Scope : module type of Scope
+(** Model-level registries for line-item definitions. *)
+
 module Series : module type of Series
 (** Declarative computations over a timeline. *)
 

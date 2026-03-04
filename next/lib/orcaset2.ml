@@ -10,5 +10,6 @@ module Calendar = Calendar
 module Timeline = Timeline
 module Schedule = Schedule
 module Key = Key
+module Scope = Scope
 module Series = Series
 module Statement = Statement

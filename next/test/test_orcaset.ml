@@ -739,6 +739,32 @@ let test_key () =
   let ppstr = to_s (fun ppf -> Key.pp ppf k1) in
   check string "pp" "Revenue" ppstr
 
+(* Scope *)
+
+let test_scope () =
+  let k1 = Key.make "A" in
+  let k2 = Key.make "B" in
+  let k3 = Key.make "C" in
+  let s = Scope.create () in
+  check bool "unsealed" false (Scope.is_sealed s);
+  Scope.define s k1 1;
+  Scope.define s k2 2;
+  check int "find k1" 1 (Scope.find s k1);
+  check int "find k2" 2 (Scope.find s k2);
+  check (option int) "find_opt k3" None (Scope.find_opt s k3);
+  check int "entries len" 2 (List.length (Scope.entries s));
+  check int "keys len" 2 (List.length (Scope.keys s));
+  (* duplicate *)
+  invalid "Scope.define: duplicate key A" (fun () -> Scope.define s k1 99);
+  (* seal *)
+  Scope.seal s;
+  check bool "sealed" true (Scope.is_sealed s);
+  invalid "Scope.define: scope is sealed, cannot define C" (fun () -> Scope.define s k3 3);
+  (* find still works after seal *)
+  check int "find after seal" 1 (Scope.find s k1);
+  (* missing key *)
+  invalid "Scope.find: key C not found" (fun () -> ignore (Scope.find s k3))
+
 (* Run *)
 
 let () =
@@ -763,5 +789,6 @@ let () =
       ("Statement", [ test_case "statement" `Quick test_statement ]);
       ("Deps", [ test_case "deps" `Quick test_deps ]);
       ("Key", [ test_case "key" `Quick test_key ]);
+      ("Scope", [ test_case "scope" `Quick test_scope ]);
       ("Integration", [ test_case "coffee shop" `Quick test_coffee_shop ]);
     ]
