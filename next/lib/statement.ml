@@ -11,6 +11,8 @@ type 'a item =
 
 let line label data = Line { label; data }
 let group ?total label items = Group { label; items; total }
+let flow_line label f = Line { label; data = Flow.formula f }
+let balance_line label b = Line { label; data = Balance.formula b }
 
 (* Traversal *)
 

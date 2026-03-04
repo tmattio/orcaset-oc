@@ -496,6 +496,15 @@ let test_statement () =
   in
   check bool "custom P0" true (has "P0" out);
   check bool "custom sep" true (has "=====" out);
+  (* flow_line / balance_line convenience *)
+  let rev = Flow.const 1000.0 in
+  let cash = Balance.const 5000.0 in
+  let stmt =
+    Statement.group "Mixed"
+      [ Statement.flow_line "Revenue" rev; Statement.balance_line "Cash" cash ]
+  in
+  let result = Statement.eval tl3 stmt in
+  check int "mixed lines" 2 (List.length (Statement.lines result));
   (* eval_materialized keeps period bindings *)
   let mat_stmt =
     Statement.eval_materialized tl3

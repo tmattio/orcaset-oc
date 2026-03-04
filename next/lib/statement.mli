@@ -56,6 +56,14 @@ val group : ?total:'a -> string -> 'a item list -> 'a item
     When [total] is omitted, {!eval} and {!auto_total} will synthesize one by summing the direct
     children's data. Supply an explicit [total] to override this with a custom calculation. *)
 
+val flow_line : string -> 'c Flow.t -> 'c Formula.t item
+(** [flow_line label f] is [line label (Flow.formula f)]. Convenience for adding a flow to a
+    statement without manually extracting the formula. *)
+
+val balance_line : string -> 'c Balance.t -> 'c Formula.t item
+(** [balance_line label b] is [line label (Balance.formula b)]. Convenience for adding a balance to
+    a statement without manually extracting the formula. *)
+
 (** {1:traversal Traversal} *)
 
 val fold :
