@@ -53,13 +53,18 @@ val of_array : ?name:string -> float array -> 'c t
     [Array.length arr] produce [0.0]. The array is captured by reference and must not be mutated
     after the call. *)
 
-val init : ?name:string -> (int -> Period.t -> float) -> 'c t
-(** [init f] is a series that produces [f i period] at period [i]. The function receives both the
-    zero-based index and the {!Period.t}, giving access to calendar dates.
+val init_flow : ?name:string -> (Period.t -> float) -> 'c t
+(** [init_flow f] is a series that produces [f period] at each period. This is the preferred
+    constructor for period-based computations.
 
     {[
-      let days = Series.init (fun _i p -> Period.days p |> float_of_int)
+      let days = Series.init_flow (fun p -> Period.days p |> float_of_int)
     ]} *)
+
+val init : ?name:string -> (int -> Period.t -> float) -> 'c t
+(** [init f] is a series that produces [f i period] at period [i]. The function receives both the
+    zero-based index and the {!Period.t}. Prefer {!init_flow} unless the index is genuinely needed
+    (e.g. indexing into an external array). *)
 
 val init_tl : ?name:string -> (Timeline.t -> int -> Period.t -> float) -> 'c t
 (** [init_tl f] is like {!init} but [f] also receives the {!Timeline.t} being evaluated. Use this

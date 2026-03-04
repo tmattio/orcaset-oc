@@ -219,6 +219,9 @@ let test_series_constructors () =
   ev "init days" tl3
     (Series.init (fun _i p -> Period.days p |> float_of_int))
     [| 31.0; 28.0; 31.0 |];
+  ev "init_flow" tl3
+    (Series.init_flow (fun p -> Period.days p |> float_of_int))
+    [| 31.0; 28.0; 31.0 |];
   ev "init_tl" tl3
     (Series.init_tl (fun tl _i _p -> float_of_int (Timeline.length tl)))
     [| 3.0; 3.0; 3.0 |];

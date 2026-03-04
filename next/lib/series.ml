@@ -38,6 +38,7 @@ let const ?name v = mk ?name (Const v)
 let of_array ?name arr =
   mk ?name (Init (fun _tl i _period -> if i < Array.length arr then arr.(i) else 0.0))
 
+let init_flow ?name f = mk ?name (Init (fun _tl _i p -> f p))
 let init ?name f = mk ?name (Init (fun _tl i p -> f i p))
 let init_tl ?name f = mk ?name (Init f)
 let delay ?name thunk = mk ?name (Delay { resolved = None; thunk })
