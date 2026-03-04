@@ -17,7 +17,13 @@ type query_hint =
   | H_no_hint
 
 type 'c t = { formula : 'c Formula.t; hint : query_hint }
+
 type split_fn = Formula.Query.split_fn
+
+let default_split_fn = Formula.Query.default_split_fn
+
+exception Cycle_error = Formula.Cycle_error
+exception Convergence_error = Formula.Convergence_error
 
 let mk ?hint formula =
   { formula; hint = (match hint with Some h -> h | None -> H_no_hint) }
@@ -26,7 +32,10 @@ let mk ?hint formula =
 
 let const ?name v = mk (Formula.const ?name v)
 let init ?name f = mk (Formula.init_flow ?name f)
-let of_events ?name events = mk ~hint:(H_events events) (Formula.of_events ?name events)
+let init_indexed ?name f = mk (Formula.init ?name f)
+
+let of_events ?name events =
+  mk ~hint:(H_events events) (Formula.of_events ?name events)
 
 let of_periods ?name ?(split_fn = Formula.Query.default_split_fn) pairs =
   let formula =
@@ -43,11 +52,13 @@ let of_periods ?name ?(split_fn = Formula.Query.default_split_fn) pairs =
             else
               let _, after =
                 split_fn ~start_date:(Period.start_date src_p)
-                  ~end_date:(Period.end_date src_p) ~split_date:ov_start ~value:v
+                  ~end_date:(Period.end_date src_p) ~split_date:ov_start
+                  ~value:v
               in
               let contribution, _ =
-                split_fn ~start_date:ov_start ~end_date:(Period.end_date src_p)
-                  ~split_date:ov_end ~value:after
+                split_fn ~start_date:ov_start
+                  ~end_date:(Period.end_date src_p) ~split_date:ov_end
+                  ~value:after
               in
               acc +. contribution)
           0.0 pairs)
@@ -69,12 +80,16 @@ let named name f = { formula = Formula.named name f.formula; hint = f.hint }
 (* Exact algebra *)
 
 let add a b =
-  { formula = Formula.add a.formula b.formula;
-    hint = H_sum [ a.hint; b.hint ] }
+  {
+    formula = Formula.add a.formula b.formula;
+    hint = H_sum [ a.hint; b.hint ];
+  }
 
 let sub a b =
-  { formula = Formula.sub a.formula b.formula;
-    hint = H_sum [ a.hint; H_neg b.hint ] }
+  {
+    formula = Formula.sub a.formula b.formula;
+    hint = H_sum [ a.hint; H_neg b.hint ];
+  }
 
 let scale k s =
   { formula = Formula.scale k s.formula; hint = H_scale (k, s.hint) }
@@ -82,19 +97,46 @@ let scale k s =
 let neg s = { formula = Formula.neg s.formula; hint = H_neg s.hint }
 
 let sum ?name fs =
-  { formula = Formula.sum ?name (List.map (fun f -> f.formula) fs);
-    hint = H_sum (List.map (fun f -> f.hint) fs) }
+  {
+    formula = Formula.sum ?name (List.map (fun f -> f.formula) fs);
+    hint = H_sum (List.map (fun f -> f.hint) fs);
+  }
 
 (* Cell-local combinators *)
 
 let map ?name f s = mk (Formula.map ?name f s.formula)
 let map2 ?name f a b = mk (Formula.map2 ?name f a.formula b.formula)
 let mul a b = mk (Formula.mul a.formula b.formula)
+let div a b = mk (Formula.div a.formula b.formula)
+let abs s = mk (Formula.abs s.formula)
+let min a b = mk (Formula.min a.formula b.formula)
+let max a b = mk (Formula.max a.formula b.formula)
+let clamp ~lo ~hi s = mk (Formula.clamp ~lo ~hi s.formula)
+let round digits s = mk (Formula.round digits s.formula)
+
+(* Conditional *)
+
+let where ~cond ~then_ ~else_ =
+  mk (Formula.where ~cond:cond.formula ~then_:then_.formula ~else_:else_.formula)
 
 (* Cross-period *)
 
 let prev ?name src ~default = mk (Formula.prev ?name src.formula ~default)
 let scan ?name ~init f flow = mk (Formula.scan ?name ~init f flow.formula)
+
+(* Feedback *)
+
+let feedback ?name ~default f =
+  Formula.feedback ?name ~default (fun prev_formula ->
+      let prev_flow = { formula = prev_formula; hint = H_no_hint } in
+      let def, exposed = f prev_flow in
+      (def.formula, exposed))
+
+let fixpoint ?name ?tol ?max_iter ~guess f =
+  mk
+    (Formula.fixpoint ?name ?tol ?max_iter ~guess (fun var ->
+         let body = f { formula = var; hint = H_no_hint } in
+         body.formula))
 
 (* Currency conversion *)
 
@@ -121,11 +163,16 @@ module Materialized = struct
     | Q_neg of query_ctx
     | Q_cell_based
 
-  type 'c t = { timeline : Timeline.t; values : float array; query : query_ctx }
+  type 'c t = {
+    timeline : Timeline.t;
+    values : float array;
+    query : query_ctx;
+  }
 
   let make tl values =
     if Array.length values <> Timeline.length tl then
-      invalid_arg "Flow.Materialized.make: array length does not match timeline length";
+      invalid_arg
+        "Flow.Materialized.make: array length does not match timeline length";
     { timeline = tl; values; query = Q_cell_based }
 
   let query m = m.query
@@ -161,8 +208,8 @@ module Materialized = struct
     | Q_events events ->
         List.fold_left
           (fun acc (d, v) ->
-            if Date.compare d start_date >= 0 && Date.compare d end_date < 0 then
-              acc +. v
+            if Date.compare d start_date >= 0 && Date.compare d end_date < 0
+            then acc +. v
             else acc)
           0.0 events
     | Q_source_periods { pairs; split_fn } ->
@@ -176,11 +223,13 @@ module Materialized = struct
             else
               let _, after =
                 split_fn ~start_date:(Period.start_date src_p)
-                  ~end_date:(Period.end_date src_p) ~split_date:ov_start ~value:v
+                  ~end_date:(Period.end_date src_p) ~split_date:ov_start
+                  ~value:v
               in
               let contribution, _ =
                 split_fn ~start_date:ov_start
-                  ~end_date:(Period.end_date src_p) ~split_date:ov_end ~value:after
+                  ~end_date:(Period.end_date src_p) ~split_date:ov_end
+                  ~value:after
               in
               acc +. contribution)
           0.0 pairs
@@ -189,14 +238,38 @@ module Materialized = struct
           (fun acc c -> acc +. accrue_via_ctx c ~start_date ~end_date)
           0.0 ctxs
     | Q_scale (k, c) -> k *. accrue_via_ctx c ~start_date ~end_date
-    | Q_neg c -> -.(accrue_via_ctx c ~start_date ~end_date)
+    | Q_neg c -> -.accrue_via_ctx c ~start_date ~end_date
     | Q_cell_based -> raise_notrace Exit
 
   let accrue ?split_fn m ~start_date ~end_date =
     match accrue_via_ctx m.query ~start_date ~end_date with
     | v -> v
     | exception Exit ->
-        Formula.Query.accrue ?split_fn m.timeline m.values ~start_date ~end_date
+        Formula.Query.accrue ?split_fn m.timeline m.values ~start_date
+          ~end_date
+end
+
+(* Dependency graph *)
+
+module Deps = struct
+  type node = Formula.Deps.node
+  type edge = Formula.Deps.edge
+
+  let graph ?named_only flows =
+    Formula.Deps.graph ?named_only (List.map (fun f -> f.formula) flows)
+
+  let pp_dot ?named_only ppf flows =
+    Formula.Deps.pp_dot ?named_only ppf (List.map (fun f -> f.formula) flows)
+end
+
+(* Infix syntax *)
+
+module Syntax = struct
+  let ( + ) = add
+  let ( - ) = sub
+  let ( * ) = mul
+  let ( / ) = div
+  let ( *$ ) k s = scale k s
 end
 
 (* Evaluation *)
@@ -215,3 +288,11 @@ let eval tl f =
   { Materialized.timeline = tl; values; query = hint_to_ctx f.hint }
 
 let eval_values tl f = Formula.eval tl f.formula
+
+let eval_many tl flows =
+  let formulas = List.map (fun f -> f.formula) flows in
+  let value_arrays = Formula.eval_many tl formulas in
+  List.map2
+    (fun f values ->
+      { Materialized.timeline = tl; values; query = hint_to_ctx f.hint })
+    flows value_arrays

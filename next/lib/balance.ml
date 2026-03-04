@@ -121,6 +121,45 @@ let map2 ?name f a b =
 let mul a b =
   { formula = Formula.mul a.formula b.formula; hint = BH_mul (a.hint, b.hint) }
 
+let div a b =
+  {
+    formula = Formula.div a.formula b.formula;
+    hint = BH_map2 ((fun a b -> a /. b), a.hint, b.hint);
+  }
+
+let abs s =
+  { formula = Formula.abs s.formula; hint = BH_map (Float.abs, s.hint) }
+
+let min a b =
+  {
+    formula = Formula.min a.formula b.formula;
+    hint = BH_map2 (Float.min, a.hint, b.hint);
+  }
+
+let max a b =
+  {
+    formula = Formula.max a.formula b.formula;
+    hint = BH_map2 (Float.max, a.hint, b.hint);
+  }
+
+let clamp ~lo ~hi s =
+  {
+    formula = Formula.clamp ~lo ~hi s.formula;
+    hint = BH_map ((fun x -> Float.min hi (Float.max lo x)), s.hint);
+  }
+
+let round digits s =
+  let factor = 10.0 ** float_of_int digits in
+  {
+    formula = Formula.round digits s.formula;
+    hint = BH_map ((fun x -> Float.round (x *. factor) /. factor), s.hint);
+  }
+
+let where ~cond ~then_ ~else_ =
+  mk
+    (Formula.where ~cond:(Flow.unsafe_to_formula cond) ~then_:then_.formula
+       ~else_:else_.formula)
+
 (* Cross-period *)
 
 let prev ?name src ~default = mk (Formula.prev ?name src.formula ~default)
@@ -309,6 +348,19 @@ module Materialized = struct
                      "Balance.Materialized.at: date %s is outside the timeline"
                      (Date.to_string date))
             | Some i -> m.values.(i)))
+end
+
+(* Dependency graph *)
+
+module Deps = struct
+  type node = Formula.Deps.node
+  type edge = Formula.Deps.edge
+
+  let graph ?named_only balances =
+    Formula.Deps.graph ?named_only (List.map (fun b -> b.formula) balances)
+
+  let pp_dot ?named_only ppf balances =
+    Formula.Deps.pp_dot ?named_only ppf (List.map (fun b -> b.formula) balances)
 end
 
 (* Evaluation *)

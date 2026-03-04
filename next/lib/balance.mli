@@ -98,6 +98,29 @@ val map2 :
 val mul : 'c t -> 'c t -> 'c t
 (** [mul a b] is the pointwise product of [a] and [b]. *)
 
+val div : 'c t -> 'c t -> 'c t
+(** [div a b] is the pointwise quotient [a /. b]. *)
+
+val abs : 'c t -> 'c t
+(** [abs b] is the pointwise absolute value of [b]. *)
+
+val min : 'c t -> 'c t -> 'c t
+(** [min a b] is the pointwise minimum of [a] and [b]. *)
+
+val max : 'c t -> 'c t -> 'c t
+(** [max a b] is the pointwise maximum of [a] and [b]. *)
+
+val clamp : lo:float -> hi:float -> 'c t -> 'c t
+(** [clamp ~lo ~hi b] clamps each value to [[lo, hi]]. *)
+
+val round : int -> 'c t -> 'c t
+(** [round digits b] rounds each value to [digits] decimal
+    places. *)
+
+val where : cond:'a Flow.t -> then_:'c t -> else_:'c t -> 'c t
+(** [where ~cond ~then_ ~else_] selects [then_] when
+    [cond.(i) <> 0.0] and [else_] otherwise. *)
+
 (** {1:cross_period Cross-period} *)
 
 val prev : ?name:string -> 'c t -> default:float -> 'c t
@@ -282,6 +305,24 @@ module Materialized : sig
 
       Raises [Invalid_argument] if [date] is outside the
       timeline. *)
+end
+
+(** {1:deps Dependency graph} *)
+
+module Deps : sig
+  type node = Flow.Deps.node
+  (** A node in the dependency graph. *)
+
+  type edge = Flow.Deps.edge
+  (** A directed edge from a dependency to a consumer. *)
+
+  val graph : ?named_only:bool -> _ t list -> node list * edge list
+  (** [graph roots] returns all nodes and edges reachable from
+      [roots]. *)
+
+  val pp_dot :
+    ?named_only:bool -> Format.formatter -> _ t list -> unit
+  (** [pp_dot ppf roots] formats a Graphviz DOT representation. *)
 end
 
 val eval : Timeline.t -> 'c t -> 'c Materialized.t

@@ -20,7 +20,7 @@
     in general. Use for percentage calculations, conditional logic,
     and cross-type operations (e.g. balance {e ×} year fraction).
 
-    {1:constructors Constructors} *)
+    {1:types Types} *)
 
 type 'c t
 (** The type for flows tagged with currency or unit ['c]. *)
@@ -29,11 +29,35 @@ type split_fn = Formula.Query.split_fn
 (** The type for functions that split a period's value at a date.
     See {!Formula.Query.split_fn}. *)
 
+val default_split_fn : split_fn
+(** [default_split_fn] distributes the value proportionally by day
+    count. *)
+
+(** {1:exceptions Exceptions} *)
+
+exception Cycle_error of { formula_name : string option; period_index : int }
+(** Raised when evaluation detects a same-period dependency cycle. *)
+
+exception
+  Convergence_error of {
+    formula_name : string option;
+    period_index : int;
+    iterations : int;
+  }
+(** Raised when {!fixpoint} does not converge. *)
+
+(** {1:constructors Constructors} *)
+
 val const : ?name:string -> float -> 'c t
 (** [const v] is a flow that produces [v] at every period. *)
 
 val init : ?name:string -> (Period.t -> float) -> 'c t
 (** [init f] is a flow that produces [f period] at each period. *)
+
+val init_indexed : ?name:string -> (int -> Period.t -> float) -> 'c t
+(** [init_indexed f] is a flow that produces [f i period] at period
+    [i]. Prefer {!init} unless the index is genuinely needed (e.g.
+    indexing into an external array). *)
 
 val of_events : ?name:string -> (Date.t * float) list -> 'c t
 (** [of_events events] distributes sparse [(date, value)] pairs
@@ -69,7 +93,7 @@ val growth_simple :
   float ->
   'c t
 (** [growth_simple ~start_date ~rate initial] is a flow with
-    simple (linear) growth. See {!Formula.growth_simple}. *)
+    simple (linear) growth. *)
 
 val growth_compound :
   ?name:string ->
@@ -79,11 +103,11 @@ val growth_compound :
   float ->
   'c t
 (** [growth_compound ~start_date ~rate initial] is a flow with
-    compound growth. See {!Formula.growth_compound}. *)
+    compound growth. *)
 
 val year_frac : ?name:string -> (Date.t -> Date.t -> float) -> 'c t
 (** [year_frac daycount] is a flow that produces the year fraction
-    of each period. See {!Formula.year_frac}. *)
+    of each period. *)
 
 (** {1:naming Naming} *)
 
@@ -133,6 +157,31 @@ val map2 :
 val mul : 'c t -> 'c t -> 'c t
 (** [mul a b] is the pointwise product of [a] and [b]. *)
 
+val div : 'c t -> 'c t -> 'c t
+(** [div a b] is the pointwise quotient [a /. b]. Division by
+    zero produces [infinity] or [nan] per IEEE 754. *)
+
+val abs : 'c t -> 'c t
+(** [abs f] is the pointwise absolute value of [f]. *)
+
+val min : 'c t -> 'c t -> 'c t
+(** [min a b] is the pointwise minimum of [a] and [b]. *)
+
+val max : 'c t -> 'c t -> 'c t
+(** [max a b] is the pointwise maximum of [a] and [b]. *)
+
+val clamp : lo:float -> hi:float -> 'c t -> 'c t
+(** [clamp ~lo ~hi f] clamps each value to [[lo, hi]]. *)
+
+val round : int -> 'c t -> 'c t
+(** [round digits f] rounds each value to [digits] decimal
+    places. *)
+
+val where : cond:'a t -> then_:'c t -> else_:'c t -> 'c t
+(** [where ~cond ~then_ ~else_] selects [then_] when
+    [cond.(i) <> 0.0] and [else_] otherwise. Only the selected
+    branch is evaluated at each period. *)
+
 (** {1:cross_period Cross-period} *)
 
 val prev : ?name:string -> 'c t -> default:float -> 'c t
@@ -148,6 +197,37 @@ val scan :
 (** [scan ~init f flow] produces a running accumulation:
     - Period 0: [f ~acc:init ~x:flow.(0)]
     - Period i: [f ~acc:result.(i-1) ~x:flow.(i)] *)
+
+(** {1:feedback Feedback} *)
+
+val feedback :
+  ?name:string ->
+  default:float ->
+  ('c t -> 'c t * 'a) ->
+  'a
+(** [feedback ~default f] ties a self-referential knot for flows.
+    It calls [f] with a flow representing the {e previous period's}
+    value ([default] at period 0). [f] returns
+    [(definition, result)] where [definition] is the flow fed back
+    and [result] is returned to the caller.
+
+    @raise Cycle_error if [definition] contains a same-period
+    cycle. *)
+
+val fixpoint :
+  ?name:string ->
+  ?tol:float ->
+  ?max_iter:int ->
+  guess:float ->
+  ('c t -> 'c t) ->
+  'c t
+(** [fixpoint ~guess f] finds the value [x] at each period such
+    that [f (const x)] converges to [x] (within [tol]).
+
+    [tol] defaults to [1e-10]. [max_iter] defaults to [100].
+
+    @raise Convergence_error if [max_iter] iterations are
+    exhausted. *)
 
 (** {1:convert Currency conversion} *)
 
@@ -270,4 +350,53 @@ val eval : Timeline.t -> 'c t -> 'c Materialized.t
 
 val eval_values : Timeline.t -> 'c t -> float array
 (** [eval_values tl f] materializes [f] against [tl] as a raw
-    [float array]. Expert use; prefer {!eval}. *)
+    [float array]. Prefer {!eval}. *)
+
+val eval_many : Timeline.t -> 'c t list -> 'c Materialized.t list
+(** [eval_many tl fs] materializes each flow in [fs] against [tl],
+    sharing a single memoization context. Use this when evaluating
+    multiple flows that share subexpressions to avoid redundant
+    computation. *)
+
+(** {1:deps Dependency graph} *)
+
+module Deps : sig
+  type node = Formula.Deps.node
+  (** A node in the dependency graph. *)
+
+  type edge = Formula.Deps.edge
+  (** A directed edge from a dependency to a consumer. *)
+
+  val graph : ?named_only:bool -> _ t list -> node list * edge list
+  (** [graph roots] returns all nodes and edges reachable from
+      [roots]. When [named_only] is [true], unnamed intermediate
+      nodes are collapsed. Default is [false]. *)
+
+  val pp_dot :
+    ?named_only:bool -> Format.formatter -> _ t list -> unit
+  (** [pp_dot ppf roots] formats a Graphviz DOT representation. *)
+end
+
+(** {1:syntax Infix syntax}
+
+    Open this module to use arithmetic operators on flows.
+
+    {b Warning.} This shadows the [Stdlib] integer operators
+    [( + )], [( - )], [( * )] and [( / )]. *)
+
+module Syntax : sig
+  val ( + ) : 'c t -> 'c t -> 'c t
+  (** [a + b] is {!add}[ a b]. *)
+
+  val ( - ) : 'c t -> 'c t -> 'c t
+  (** [a - b] is {!sub}[ a b]. *)
+
+  val ( * ) : 'c t -> 'c t -> 'c t
+  (** [a * b] is {!mul}[ a b]. *)
+
+  val ( / ) : 'c t -> 'c t -> 'c t
+  (** [a / b] is {!div}[ a b]. *)
+
+  val ( *$ ) : float -> 'c t -> 'c t
+  (** [k *$ f] is {!scale}[ k f]. *)
+end
