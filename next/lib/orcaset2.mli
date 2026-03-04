@@ -54,6 +54,9 @@ module Timeline : module type of Timeline
 module Schedule : module type of Schedule
 (** Financial schedule generation with roll, stub, and business day conventions. *)
 
+module Key : module type of Key
+(** Unique line-item identifiers. *)
+
 module Series : module type of Series
 (** Declarative computations over a timeline. *)
 

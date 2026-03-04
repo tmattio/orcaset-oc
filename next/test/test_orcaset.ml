@@ -722,6 +722,23 @@ let test_coffee_shop () =
   fl "cash m0" 35100.0 cv.(0);
   check bool "cash recovers" true (cv.(11) > cv.(0))
 
+(* Key *)
+
+let test_key () =
+  let k1 = Key.make "Revenue" in
+  let k2 = Key.make "COGS" in
+  let k3 = Key.make "Revenue" in
+  check string "name" "Revenue" (Key.name k1);
+  check string "name2" "COGS" (Key.name k2);
+  check bool "distinct" false (Key.equal k1 k2);
+  check bool "same name distinct" false (Key.equal k1 k3);
+  check bool "self equal" true (Key.equal k1 k1);
+  check bool "compare self" true (Key.compare k1 k1 = 0);
+  check bool "compare order" true (Key.compare k1 k2 < 0);
+  check string "to_string" "Revenue" (Key.to_string k1);
+  let ppstr = to_s (fun ppf -> Key.pp ppf k1) in
+  check string "pp" "Revenue" ppstr
+
 (* Run *)
 
 let () =
@@ -745,5 +762,6 @@ let () =
         ] );
       ("Statement", [ test_case "statement" `Quick test_statement ]);
       ("Deps", [ test_case "deps" `Quick test_deps ]);
+      ("Key", [ test_case "key" `Quick test_key ]);
       ("Integration", [ test_case "coffee shop" `Quick test_coffee_shop ]);
     ]

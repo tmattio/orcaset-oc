@@ -9,5 +9,6 @@ module Daycount = Daycount
 module Calendar = Calendar
 module Timeline = Timeline
 module Schedule = Schedule
+module Key = Key
 module Series = Series
 module Statement = Statement
