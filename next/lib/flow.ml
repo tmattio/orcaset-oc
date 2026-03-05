@@ -148,6 +148,7 @@ let convert ~rate s =
 let unsafe_to_formula f = f.formula
 let unsafe_of_formula s = { formula = s; hint = H_no_hint }
 let unsafe_of_array ?name arr = mk (Formula.of_array ?name arr)
+let of_array = unsafe_of_array
 
 (* Materialized *)
 
@@ -247,25 +248,6 @@ module Materialized = struct
     | exception Exit ->
         Formula.Query.accrue ?split_fn m.timeline m.values ~start_date
           ~end_date
-end
-
-(* Internal re-exports for cross-module use *)
-
-module Materialized_internal = struct
-  type query_ctx = Materialized.query_ctx =
-    | Q_events of (Date.t * float) list
-    | Q_source_periods of {
-        pairs : (Period.t * float) list;
-        split_fn : Formula.Query.split_fn;
-      }
-    | Q_sum of query_ctx list
-    | Q_scale of float * query_ctx
-    | Q_neg of query_ctx
-    | Q_cell_based
-
-  let accrue_via_ctx = Materialized.accrue_via_ctx
-  let query = Materialized.query
-  let unsafe_values = Materialized.unsafe_values
 end
 
 (* Dependency graph *)

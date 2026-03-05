@@ -3,78 +3,51 @@
    SPDX-License-Identifier: SSPL-1.0
   ---------------------------------------------------------------------------*)
 
-(** Declarative computations over a timeline.
+(** {b Internal} -- Declarative computation DAG over timelines.
 
-    A {!type-t} value is a recipe for computing one [float] per {!Period.t} in a {!Timeline.t}.
-    Recipes are composed declaratively as a directed acyclic graph of combinators and materialized
-    into a [float array] by {!eval}.
+    The core computation engine. {!Flow} and {!Balance} wrap this
+    module with provenance tracking for partial-period accrual and
+    date-based interpolation. Not exposed to library users (private
+    module via dune).
 
-    {1:model Computation model}
-
-    A formula holds no data. It is a node in a DAG that is evaluated against a concrete
-    {!Timeline.t}. Evaluation proceeds left to right (period 0, 1, {e ...}, n-1) and every
-    {e (formula, period)} cell is computed at most once.
-
-    {!prev} and {!scan} are the only combinators that introduce cross-period dependencies; all
-    others are pointwise within a single period. Same-period cycles are detected at evaluation time
-    and raise {!Cycle_error}. Cross-period cycles are structurally impossible: {!prev} shifts by one
-    period and {!scan} only reads its own earlier output.
-
-    {1:currency Currency safety}
-
-    The type parameter ['c] is a phantom tag representing the currency or unit of the formula.
-    Combinators like {!add} and {!sub} require both operands to share the same tag, preventing
-    accidental mixing of currencies at compile time. Constructors return a universally quantified
-    ['c t], so single-currency models need no annotations. For multi-currency models, annotate entry
-    points to pin the currency and use {!convert} to change it:
-
-    {[
-      type usd
-      type eur
-
-      let eur_revenue : eur Formula.t = Formula.growth_simple ~start_date ~rate:0.05 8000.0
-      let usd_revenue : usd Formula.t = Formula.convert ~rate:1.08 eur_revenue
-    ]}
-
-    {b Thread safety.} Formula values are pure DAG descriptions, but evaluation mutates internal
-    caches ({!type-t} values with {!feedback} or {!fixpoint} contain mutable refs). Do not evaluate
-    the same formula concurrently from multiple domains.
-
-    {1:constructors Constructors} *)
+    {b Thread safety.} Formula values are pure DAG descriptions,
+    but evaluation mutates internal memoization caches. Do not
+    evaluate the same formula concurrently from multiple
+    domains. *)
 
 type +'c t
-(** The type for formulas tagged with currency or unit ['c]. *)
+(** The type for formulas. A node in a DAG that is evaluated
+    against a {!Timeline.t} to produce one [float] per period.
+    Covariant in ['c] (the currency/unit phantom tag). *)
+
+(** {1 Constructors} *)
 
 val const : ?name:string -> float -> 'c t
 (** [const v] is a formula that produces [v] at every period. *)
 
 val of_array : ?name:string -> float array -> 'c t
-(** [of_array arr] is a formula that produces [arr.(i)] at period [i]. Periods beyond
-    [Array.length arr] produce [0.0]. The array is captured by reference and must not be mutated
-    after the call. *)
+(** [of_array arr] is a formula that produces [arr.(i)] at period
+    [i]. Periods beyond [Array.length arr] produce [0.0].
+
+    {b Warning.} The array is captured by reference and must not
+    be mutated after the call. *)
 
 val init_flow : ?name:string -> (Period.t -> float) -> 'c t
-(** [init_flow f] is a formula that produces [f period] at each period. This is the preferred
-    constructor for period-based computations.
+(** [init_flow f] is a formula that produces [f period] at each
+    period. Wrapped by {!Flow.init}. *)
 
-    {[
-      let days = Formula.init_flow (fun p -> Period.days p |> float_of_int)
-    ]} *)
+val init :
+  ?name:string -> (int -> Period.t -> float) -> 'c t
+(** [init f] is a formula that produces [f i period] at period
+    [i]. Wrapped by {!Flow.init_indexed}. *)
 
-(** {2:advanced_constructors Advanced constructors}
-
-    These constructors expose the period index or timeline. Prefer {!init_flow} for
-    period-based computations. *)
-
-val init : ?name:string -> (int -> Period.t -> float) -> 'c t
-(** [init f] is a formula that produces [f i period] at period [i]. The function receives both the
-    zero-based index and the {!Period.t}. Prefer {!init_flow} unless the index is genuinely needed
-    (e.g. indexing into an external array). *)
-
-val init_tl : ?name:string -> (Timeline.t -> int -> Period.t -> float) -> 'c t
-(** [init_tl f] is like {!init} but [f] also receives the {!Timeline.t} being evaluated. Use this
-    when the computation needs timeline-level information such as the total number of periods or
-    precomputation across all periods. *)
+val init_tl :
+  ?name:string ->
+  (Timeline.t -> int -> Period.t -> float) ->
+  'c t
+(** [init_tl f] is like {!init} but [f] also receives the
+    {!Timeline.t}. Use when the computation needs timeline-level
+    information (e.g. total number of periods). *)
 
 val growth_simple :
   ?name:string ->
@@ -83,18 +56,8 @@ val growth_simple :
   rate:float ->
   float ->
   'c t
-(** [growth_simple ~start_date ~rate initial] is a formula that produces
-    [initial *. (1.0 +. rate *. daycount start_date period_start)] at each period (simple / linear
-    growth). [daycount] defaults to {!Daycount.actual_360}.
-
-    {[
-      let revenue = Formula.growth_simple ~start_date ~rate:0.05 8000.0
-
-      let rent =
-        Formula.growth_simple ~start_date ~rate:0.03 ~daycount:Daycount.calendar_monthly 2000.0
-    ]}
-
-    See also {!growth_compound} for compounding growth. *)
+(** [growth_simple ~start_date ~rate initial] is simple (linear)
+    growth. [daycount] defaults to {!Daycount.actual_360}. *)
 
 val growth_compound :
   ?name:string ->
@@ -103,44 +66,43 @@ val growth_compound :
   rate:float ->
   float ->
   'c t
-(** [growth_compound ~start_date ~rate initial] is a formula that produces
-    [initial *. (1.0 +. rate) ** (daycount start_date period_start)] at each period (discrete
-    compounding). [daycount] defaults to {!Daycount.actual_360}.
+(** [growth_compound ~start_date ~rate initial] is compound
+    growth. [daycount] defaults to {!Daycount.actual_360}. *)
 
-    Use this when the rate compounds rather than accrues linearly. See also {!growth_simple}. *)
+val year_frac :
+  ?name:string -> (Date.t -> Date.t -> float) -> 'c t
+(** [year_frac daycount] produces [daycount start end] for each
+    period. *)
 
-val year_frac : ?name:string -> (Date.t -> Date.t -> float) -> 'c t
-(** [year_frac daycount] is a formula that produces [daycount period_start period_end] at each
-    period. Useful for computing interest as [balance * rate * year_frac]. *)
+val of_events :
+  ?name:string -> (Date.t * float) list -> 'c t
+(** [of_events events] bins [(date, value)] pairs into periods.
+    Multiple events in the same period are summed. Periods with
+    no events produce [0.0].
 
-val of_events : ?name:string -> (Date.t * float) list -> 'c t
-(** [of_events events] distributes sparse [(date, value)] pairs into periods. Each event is placed
-    in the period found by {!Timeline.find_index} (start-inclusive, end-exclusive; last period
-    end-inclusive). Multiple events in the same period are summed. Periods with no events produce
-    [0.0].
+    Raises [Invalid_argument] if any date falls outside the
+    timeline. *)
 
-    Raises [Invalid_argument] if any event date falls outside the timeline.
-
-    {b Performance.} Events are binned once per evaluation in O(events {e *} log periods) using
-    binary search; subsequent period lookups are O(1). *)
-
-(** {1:naming Naming} *)
+(** {1 Naming} *)
 
 val named : string -> 'c t -> 'c t
-(** [named name s] attaches [name] to [s] for use in {!Cycle_error} and {!Convergence_error}
-    diagnostics and as a label in {!Deps.pp_dot}. The returned formula shares memoization state with
-    [s]. *)
+(** [named name s] attaches [name] for {!Cycle_error},
+    {!Convergence_error} diagnostics and {!Deps.pp_dot} labels.
+    Shares memoization state with [s]. *)
 
-(** {1:pointwise Pointwise combinators}
-
-    These combinators operate independently within each period. For period [i], only the values at
-    period [i] of the input formulas are used. *)
+(** {1 Pointwise combinators} *)
 
 val map : ?name:string -> (float -> float) -> 'c t -> 'c t
-(** [map f s] applies [f] to each value of [s]. *)
+(** [map f s] applies [f] to each period's value. *)
 
-val map2 : ?name:string -> (float -> float -> float) -> 'c t -> 'c t -> 'c t
-(** [map2 f a b] applies [f] to the values of [a] and [b] at each period. *)
+val map2 :
+  ?name:string ->
+  (float -> float -> float) ->
+  'c t ->
+  'c t ->
+  'c t
+(** [map2 f a b] applies [f] to the values of [a] and [b] at
+    each period. *)
 
 val add : 'c t -> 'c t -> 'c t
 (** [add a b] is the pointwise sum of [a] and [b]. *)
@@ -158,8 +120,8 @@ val neg : 'c t -> 'c t
 (** [neg s] negates every value of [s]. *)
 
 val div : 'c t -> 'c t -> 'c t
-(** [div a b] is the pointwise quotient [a /. b]. Division by zero produces [infinity] or [nan] per
-    IEEE 754. *)
+(** [div a b] is the pointwise quotient [a /. b]. Division by
+    zero produces [infinity] or [nan] per IEEE 754. *)
 
 val abs : 'c t -> 'c t
 (** [abs s] is the pointwise absolute value of [s]. *)
@@ -171,156 +133,142 @@ val max : 'c t -> 'c t -> 'c t
 (** [max a b] is the pointwise maximum of [a] and [b]. *)
 
 val clamp : lo:float -> hi:float -> 'c t -> 'c t
-(** [clamp ~lo ~hi s] clamps each value of [s] to the range [[lo, hi]]. *)
+(** [clamp ~lo ~hi s] clamps each value to
+    \[[lo]; [hi]\]. *)
 
 val round : int -> 'c t -> 'c t
-(** [round digits s] rounds each value of [s] to [digits] decimal places. Useful for simulating
-    currency precision. *)
+(** [round digits s] rounds each value to [digits] decimal
+    places. *)
 
 val sum : ?name:string -> 'c t list -> 'c t
-(** [sum ss] is the pointwise sum of all formulas in [ss]. The empty list produces [0.0] at every
-    period. *)
-
-(** {1:conditional Conditional} *)
+(** [sum ss] is the pointwise sum. The empty list produces
+    [0.0]. *)
 
 val where : cond:'a t -> then_:'c t -> else_:'c t -> 'c t
-(** [where ~cond ~then_ ~else_] selects [then_] when [cond.(i) <> 0.0] and [else_] otherwise. Only
-    the selected branch is evaluated at each period.
+(** [where ~cond ~then_ ~else_] selects [then_] when
+    [cond.(i) <> 0.0] and [else_] otherwise. Only the selected
+    branch is evaluated. *)
 
-    The condition tag ['a] is independent of the result tag ['c], so a condition derived from one
-    currency can guard branches of another. *)
+(** {1 Cross-period operators}
 
-(** {1:cross_period Cross-period operators}
+    The only way to express temporal relationships. Same-period
+    cycles are detected at evaluation time ({!Cycle_error}).
+    Cross-period cycles are structurally impossible: {!prev}
+    shifts by one period and {!scan} only reads its own earlier
+    output. *)
 
-    These operators introduce dependencies between periods and are the only way to express temporal
-    relationships. *)
-
-(* CR: documentation here is pretty bad and goes into implementation detail that's not relevant?
- Some implementation detail would probably useful, but not that. *)
 val prev : ?name:string -> 'c t -> default:float -> 'c t
-(** [prev s ~default] produces [default] at period 0 and [s.(i-1)] at period [i > 0]. This is the
-    primitive for cross-period dependencies and the mechanism by which {!feedback} breaks
-    same-period cycles in mutually recursive formulas. *)
+(** [prev s ~default] produces [default] at period 0 and
+    [s.(i-1)] at period [i > 0]. The primitive for cross-period
+    dependencies. *)
 
-val scan : ?name:string -> init:float -> (acc:float -> x:float -> float) -> 'c t -> 'c t
-(** [scan ~init f flow] produces a running accumulation over [flow]:
-    - Period 0: [f ~acc:init ~x:flow.(0)]
-    - Period i: [f ~acc:result.(i-1) ~x:flow.(i)]
+val scan :
+  ?name:string ->
+  init:float ->
+  (acc:float -> x:float -> float) ->
+  'c t ->
+  'c t
+(** [scan ~init f flow] is a running accumulation:
+    {ul
+    {- Period 0: [f ~acc:init ~x:flow.(0)]}
+    {- Period i: [f ~acc:result.(i-1) ~x:flow.(i)]}}
 
-    The accumulator [result.(i-1)] refers to the output of [scan] itself at the previous period, not
-    to [flow]. This makes [scan] suitable for balance-style computations where the output feeds back
-    into itself.
-
-    {[
-      let balance = Formula.scan ~init:1000.0 (fun ~acc ~x -> acc +. x) net_flow
-      (* balance.(0) = 1000 + net_flow.(0)
-         balance.(1) = balance.(0) + net_flow.(1)
-         ... *)
-    ]} *)
+    [acc] is the output of [scan] itself at the prior period,
+    not the input [flow]. *)
 
 val cumsum : ?name:string -> init:float -> 'c t -> 'c t
-(** [cumsum ~init flow] is {!scan}[ ~init (fun ~acc ~x -> acc +. x) flow]. Produces a running total
-    starting from [init]. *)
+(** [cumsum ~init flow] is
+    [scan ~init (fun ~acc ~x -> acc +. x) flow]. *)
 
-val feedback : ?name:string -> default:float -> ('c t -> 'c t * 'a) -> 'a
-(** [feedback ~default f] ties a self-referential knot. It calls [f] with a formula representing the
-    {e previous period's} value of the formula that [f] defines ([default] at period 0). [f] returns
-    [(definition, result)] where [definition] is the formula fed back and [result] is returned to the
-    caller.
+val feedback :
+  ?name:string ->
+  default:float ->
+  ('c t -> 'c t * 'a) ->
+  'a
+(** [feedback ~default f] ties a self-referential knot via
+    {!prev}. Calls [f] with a formula representing the
+    {e previous period's} value ([default] at period 0). [f]
+    returns [(definition, result)] where [definition] is the
+    formula fed back.
 
-    This is the standard pattern for mutual recursion between formulas. For example, interest depends
-    on the prior balance but the balance depends on principal which depends on interest:
+    Raises {!Cycle_error} if [definition] contains a same-period
+    cycle. *)
 
-    {[
-      let balance, interest =
-        Formula.feedback ~default:loan_amount (fun prev_balance ->
-            let interest =
-              Formula.map2 (fun bal yf -> -.bal *. rate *. yf) prev_balance year_fracs
-            in
-            let balance = Formula.cumsum ~init:loan_amount (Formula.sub total_pmt interest) in
-            (balance, (balance, interest)))
-    ]}
-
-    @raise Cycle_error if [definition] contains a same-period cycle. *)
-
-val fixpoint : ?name:string -> ?tol:float -> ?max_iter:int -> guess:float -> ('c t -> 'c t) -> 'c t
-(** [fixpoint ~guess f] finds the value [x] at each period such that [f (const x)] produces [x]
-    (within tolerance [tol]).
-
-    At period 0, iteration starts from [guess]. At subsequent periods it starts from the previous
-    period's converged value (warm start).
-
-    This differs from {!feedback}: [feedback] shifts by one period to break cycles, while [fixpoint]
-    iterates {e within} a single period to resolve same-period circular dependencies.
-
-    {[
-      let loan_commitment =
-        Formula.fixpoint ~guess:0.0 (fun commitment ->
-            let interest_reserve = Formula.mul (Formula.scale rate commitment) year_fracs in
-            let total_costs = Formula.add hard_costs interest_reserve in
-            Formula.scale ltc_ratio total_costs)
-    ]}
+val fixpoint :
+  ?name:string ->
+  ?tol:float ->
+  ?max_iter:int ->
+  guess:float ->
+  ('c t -> 'c t) ->
+  'c t
+(** [fixpoint ~guess f] iterates within each period to find [x]
+    such that [f (const x)] converges to [x]. At period 0
+    iteration starts from [guess]; subsequent periods warm-start
+    from the prior converged value.
 
     [tol] defaults to [1e-10]. [max_iter] defaults to [100].
 
-    @raise Convergence_error if [max_iter] iterations are exhausted. *)
+    Raises {!Convergence_error} if [max_iter] iterations are
+    exhausted. *)
 
-(** {1:convert Currency conversion} *)
+(** {1 Currency conversion} *)
 
 val convert : rate:float -> 'c1 t -> 'c2 t
-(** [convert ~rate s] scales [s] by [rate] and changes the currency tag. The target currency is
-    inferred from context. *)
+(** [convert ~rate s] scales [s] by [rate] and changes the
+    currency tag. *)
 
-(** {1:eval Evaluation} *)
+(** {1 Evaluation} *)
 
-exception Cycle_error of { formula_name : string option; period_index : int }
-(** Raised when evaluation detects a same-period dependency cycle. [formula_name] is present when
-    the formula was given a name with {!named} or a [?name] parameter. *)
+exception Cycle_error of
+  { formula_name : string option; period_index : int }
+(** Raised when evaluation detects a same-period dependency
+    cycle. [formula_name] is present when the formula was
+    given a name with {!named} or a [?name] parameter. *)
 
-exception Convergence_error of { formula_name : string option; period_index : int; iterations : int }
-(** Raised when {!fixpoint} does not converge. [iterations] is the number of iterations
-    attempted. *)
+exception Convergence_error of
+  { formula_name : string option;
+    period_index : int;
+    iterations : int }
+(** Raised when {!fixpoint} does not converge. [iterations] is
+    the number attempted. *)
 
 val eval : Timeline.t -> 'c t -> float array
-(** [eval tl s] materializes [s] against [tl], returning one [float] per period. Each formula
-    evaluates at a given period at most once.
+(** [eval tl s] materializes [s] against [tl], returning one
+    [float] per period. Each (formula, period) cell is computed
+    at most once.
 
-    @raise Cycle_error if a same-period cycle is detected.
-    @raise Convergence_error if a {!fixpoint} does not converge. *)
+    Raises {!Cycle_error} or {!Convergence_error}. *)
 
 val eval_many : Timeline.t -> 'c t list -> float array list
-(** [eval_many tl ss] materializes each formula in [ss] against [tl], sharing a single memoization
-    context. Use this when evaluating multiple formulas that share subexpressions to avoid redundant
-    computation.
+(** [eval_many tl ss] materializes each formula, sharing a
+    single memoization context to avoid redundant computation
+    of shared subexpressions.
 
-    @raise Cycle_error if a same-period cycle is detected.
-    @raise Convergence_error if a {!fixpoint} does not converge. *)
-
-(** {2:materialized Materialized results}
-
-    Evaluation results that keep period bindings attached, preventing accidental misalignment
-    between values and their periods. *)
+    Raises {!Cycle_error} or {!Convergence_error}. *)
 
 module Materialized : sig
   type 'c t
-  (** The type for materialized formula results. Each value is bound to its period. *)
+  (** The type for materialized formula results. Each value is
+      bound to its period. *)
 
   val make : Timeline.t -> float array -> 'c t
   (** [make tl values] binds [values] to the periods of [tl].
 
-      Raises [Invalid_argument] if [Array.length values <> Timeline.length tl]. *)
+      Raises [Invalid_argument] if
+      [Array.length values <> Timeline.length tl]. *)
 
   val timeline : _ t -> Timeline.t
   (** [timeline m] is the timeline [m] was evaluated against. *)
 
   val to_array : _ t -> float array
-  (** [to_array m] is a fresh copy of the values array. *)
+  (** [to_array m] is a fresh copy of the values. *)
 
   val unsafe_values : _ t -> float array
-  (** [unsafe_values m] is the backing values array. The caller must not mutate it. *)
+  (** [unsafe_values m] is the backing array. The caller must
+      not mutate it. *)
 
   val length : _ t -> int
-  (** [length m] is the number of values. *)
+  (** [length m] is the number of periods. *)
 
   val get : _ t -> int -> float
   (** [get m i] is the value at period [i]. *)
@@ -329,69 +277,54 @@ module Materialized : sig
   (** [period m i] is the period at index [i]. *)
 
   val to_list : _ t -> (Period.t * float) list
-  (** [to_list m] is the list of [(period, value)] pairs. *)
+  (** [to_list m] is the [(period, value)] pairs. *)
 
   val iter : (Period.t -> float -> unit) -> _ t -> unit
-  (** [iter f m] applies [f period value] to each element. *)
+  (** [iter f m] applies [f] to each [(period, value)]. *)
 
-  val fold : ('a -> Period.t -> float -> 'a) -> 'a -> _ t -> 'a
-  (** [fold f init m] folds [f] over each [(period, value)] pair. *)
+  val fold :
+    ('a -> Period.t -> float -> 'a) -> 'a -> _ t -> 'a
+  (** [fold f init m] folds over each [(period, value)]. *)
 end
 
 val eval_materialized : Timeline.t -> 'c t -> 'c Materialized.t
-(** [eval_materialized tl s] is like {!eval} but returns a {!Materialized.t} that keeps the
-    timeline bound to the values. *)
+(** [eval_materialized tl s] is like {!eval} but returns a
+    {!Materialized.t} with the timeline bound to the values.
 
-(** {1:syntax Infix syntax}
+    Raises {!Cycle_error} or {!Convergence_error}. *)
 
-    Open this module to use arithmetic operators on formulas.
+(** {1 Date queries}
 
-    {b Warning.} This shadows the [Stdlib] integer operators [( + )], [( - )], [( * )] and [( / )].
-*)
-
-module Syntax : sig
-  val ( + ) : 'c t -> 'c t -> 'c t
-  (** [a + b] is {!add}[ a b]. *)
-
-  val ( - ) : 'c t -> 'c t -> 'c t
-  (** [a - b] is {!sub}[ a b]. *)
-
-  val ( * ) : 'c t -> 'c t -> 'c t
-  (** [a * b] is {!mul}[ a b]. *)
-
-  val ( / ) : 'c t -> 'c t -> 'c t
-  (** [a / b] is {!div}[ a b]. *)
-
-  val ( *$ ) : float -> 'c t -> 'c t
-  (** [k *$ s] is {!scale}[ k s]. *)
-end
-
-(** {1:query Date queries}
-
-    Low-level functions for probing timeline-aligned values at arbitrary dates. These operate on raw
-    {!Timeline.t} and [float array] pairs. For typed wrappers, use {!Flow.Materialized.accrue} and
-    {!Balance.Materialized.at}.
-
-    Boundary periods are split using a {!Query.split_fn} that defaults to pro-rata by day count
-    ({!Query.default_split_fn}). *)
+    Low-level timeline probing used by {!Flow} and {!Balance}
+    for provenance-aware accrual and interpolation. *)
 
 module Query : sig
   type split_fn =
-    start_date:Date.t -> end_date:Date.t -> split_date:Date.t -> value:float -> float * float
-  (** The type for functions that split a period's value at a date. Given the period's [start_date],
-      [end_date], and a [split_date] within the period, returns [(before, after)] where
+    start_date:Date.t ->
+    end_date:Date.t ->
+    split_date:Date.t ->
+    value:float ->
+    float * float
+  (** The type for functions that split a period's value at a
+      date. Returns [(before, after)] where
       [before +. after = value]. *)
 
   val default_split_fn : split_fn
-  (** [default_split_fn] distributes the value proportionally by day count. For a period of [d] days
-      where [split_date] falls [k] days after the start: [before = value *. k /. d]. Returns
-      [(0.0, 0.0)] when the period has zero days. *)
+  (** [default_split_fn] distributes proportionally by day
+      count. Returns [(0., 0.)] for zero-day periods. *)
 
-  val interpolate : ?split_fn:split_fn -> Timeline.t -> float array -> Date.t -> float
-  (** [interpolate tl values date] is the portion of the enclosing period's value that falls before
-      [date].
+  val interpolate :
+    ?split_fn:split_fn ->
+    Timeline.t ->
+    float array ->
+    Date.t ->
+    float
+  (** [interpolate tl values date] is the portion of the
+      enclosing period's value that falls before [date].
+      [split_fn] defaults to {!default_split_fn}.
 
-      Raises [Invalid_argument] if [date] is outside the timeline. *)
+      Raises [Invalid_argument] if [date] is outside the
+      timeline. *)
 
   val accrue :
     ?split_fn:split_fn ->
@@ -400,10 +333,11 @@ module Query : sig
     start_date:Date.t ->
     end_date:Date.t ->
     float
-  (** [accrue tl values ~start_date ~end_date] sums values over the date range. Periods fully
-      contained in the range contribute their whole value. Boundary periods are split: the first
-      period contributes its {e after} portion and the last period its {e before} portion. Returns
-      [0.0] if the date range does not overlap the timeline. *)
+  (** [accrue tl values ~start_date ~end_date] sums values over
+      the date range. Boundary periods are split: first period
+      contributes its {e after} portion, last period its
+      {e before} portion. Returns [0.0] if the range does not
+      overlap the timeline. *)
 
   val balance_at :
     ?split_fn:split_fn ->
@@ -412,41 +346,49 @@ module Query : sig
     flow:float array ->
     Date.t ->
     float
-  (** [balance_at tl ~balance ~flow date] is the interpolated balance at [date]. Computes the prior
-      period's ending balance plus the portion of the current period's flow that falls before
-      [date].
+  (** [balance_at tl ~balance ~flow date] is the interpolated
+      balance at [date]: the prior period's ending balance plus
+      the portion of the current period's flow that falls before
+      [date]. Used by {!Balance.Materialized.at}.
 
-      Raises [Invalid_argument] if [date] is outside the timeline. *)
+      Raises [Invalid_argument] if [date] is outside the
+      timeline. *)
 end
 
-(** {1:deps Dependency graph}
-
-    Inspect the structure of the computation DAG. *)
+(** {1 Dependency graph} *)
 
 module Deps : sig
-  type node = { id : int; name : string option; kind : string }
-  (** A node in the dependency graph. [kind] is one of: ["const"], ["init"], ["map"], ["map2"],
-      ["sum"], ["prev"], ["scan"], ["where"], ["fixpoint"], ["var"]. *)
+  type node =
+    { id : int; name : string option; kind : string }
+  (** A node in the computation DAG. [kind] is one of:
+      ["const"], ["init"], ["map"], ["map2"], ["sum"],
+      ["prev"], ["scan"], ["where"], ["fixpoint"],
+      ["var"]. *)
 
   type edge = { src : int; dst : int }
-  (** A directed edge from a dependency to a consumer. [src] is the depended-upon node and [dst] is
-      the node that uses it. In the collapsed graph, [src] is a named dependency and [dst] is a
-      named consumer. *)
+  (** A directed edge from dependency to consumer. *)
 
-  val graph : ?named_only:bool -> _ t list -> node list * edge list
-  (** [graph roots] returns all nodes and edges reachable from [roots] by depth-first traversal.
+  val graph :
+    ?named_only:bool -> _ t list -> node list * edge list
+  (** [graph roots] returns all reachable nodes and edges.
+      When [named_only] is [true] (default [false]), unnamed
+      intermediate nodes are collapsed. *)
 
-      When [named_only] is [true], only named nodes are returned. Unnamed intermediate nodes are
-      collapsed: if named node A reaches named node B through any chain of unnamed nodes, the result
-      contains a direct edge from A to B. This produces a high-level "line item" view of the model.
-      Default is [false]. *)
+  val pp_dot :
+    ?named_only:bool ->
+    Format.formatter ->
+    _ t list ->
+    unit
+  (** [pp_dot ppf roots] formats a Graphviz DOT
+      representation. *)
+end
 
-  val pp_dot : ?named_only:bool -> Format.formatter -> _ t list -> unit
-  (** [pp_dot ppf roots] formats a Graphviz DOT representation of the DAG reachable from [roots].
-      Named nodes use their name as label; unnamed nodes use their kind. Nodes are styled by
-      category: leaf data (box, blue), pointwise operators (ellipse, gray), cross-period operators
-      (dashed box, orange), and conditionals (diamond, gray).
+(** {1 Infix syntax} *)
 
-      When [named_only] is [true], unnamed nodes are collapsed (see {!graph}) and all nodes are
-      rendered as uniform rounded boxes. Default is [false]. *)
+module Syntax : sig
+  val ( + ) : 'c t -> 'c t -> 'c t
+  val ( - ) : 'c t -> 'c t -> 'c t
+  val ( * ) : 'c t -> 'c t -> 'c t
+  val ( / ) : 'c t -> 'c t -> 'c t
+  val ( *$ ) : float -> 'c t -> 'c t
 end

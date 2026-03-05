@@ -214,7 +214,7 @@ let test_daycount () =
 
 let test_flow_constructors () =
   ev "const" tl3 (Flow.const 42.0) [| 42.0; 42.0; 42.0 |];
-  ev "of_array" tl3 (Flow.unsafe_of_array [| 1.0; 2.0 |]) [| 1.0; 2.0; 0.0 |];
+  ev "of_array" tl3 (Flow.of_array [| 1.0; 2.0 |]) [| 1.0; 2.0; 0.0 |];
   ev "init_indexed" tl3 (Flow.init_indexed (fun i _p -> float_of_int (i + 1))) [| 1.0; 2.0; 3.0 |];
   ev "init days" tl3
     (Flow.init_indexed (fun _i p -> Period.days p |> float_of_int))
@@ -239,8 +239,8 @@ let test_flow_constructors () =
 (* Flow: pointwise *)
 
 let test_flow_pointwise () =
-  let a = Flow.unsafe_of_array [| 1.0; 5.0; 3.0 |] in
-  let b = Flow.unsafe_of_array [| 2.0; 4.0; 3.0 |] in
+  let a = Flow.of_array [| 1.0; 5.0; 3.0 |] in
+  let b = Flow.of_array [| 2.0; 4.0; 3.0 |] in
   ev "add" tl3 (Flow.add a b) [| 3.0; 9.0; 6.0 |];
   ev "sub" tl3 (Flow.sub a b) [| -1.0; 1.0; 0.0 |];
   ev "mul" tl3 (Flow.mul a b) [| 2.0; 20.0; 9.0 |];
@@ -251,28 +251,29 @@ let test_flow_pointwise () =
   ev "max" tl3 (Flow.max a b) [| 2.0; 5.0; 3.0 |];
   ev "scale" tl3 (Flow.scale 2.5 a) [| 2.5; 12.5; 7.5 |];
   ev "clamp" tl3 (Flow.clamp ~lo:2.0 ~hi:4.0 a) [| 2.0; 4.0; 3.0 |];
-  ev "round" tl3 (Flow.round 2 (Flow.unsafe_of_array [| 1.005; 2.555; 3.999 |])) [| 1.0; 2.56; 4.0 |];
+  ev "round" tl3 (Flow.round 2 (Flow.of_array [| 1.005; 2.555; 3.999 |])) [| 1.0; 2.56; 4.0 |];
   ev "sum" tl3 (Flow.sum [ a; b; Flow.const 10.0 ]) [| 13.0; 19.0; 16.0 |];
   ev "map" tl3 (Flow.map (fun x -> x *. 2.0) (Flow.const 5.0)) [| 10.0; 10.0; 10.0 |];
   ev "map2" tl3 (Flow.map2 ( +. ) a b) [| 3.0; 9.0; 6.0 |];
   (* where: cond <> 0 selects then_, else otherwise *)
-  let cond = Flow.unsafe_of_array [| 1.0; 0.0; 1.0 |] in
+  let cond = Flow.of_array [| 1.0; 0.0; 1.0 |] in
   ev "where" tl3 (Flow.where ~cond ~then_:a ~else_:b) [| 1.0; 4.0; 3.0 |];
   (* syntax spot-check *)
   let open Flow.Syntax in
   ev "+" tl3 (a + b) [| 3.0; 9.0; 6.0 |];
   ev "*$" tl3 (2.0 *$ a) [| 2.0; 10.0; 6.0 |]
 
-(* Flow: cross-period *)
+(* Flow: cross-period (via Balance bridge) *)
 
 let test_flow_cross_period () =
-  let flow = Flow.unsafe_of_array [| 100.0; 200.0; 300.0 |] in
-  ev "prev" tl3 (Flow.prev flow ~default:0.0) [| 0.0; 100.0; 200.0 |];
-  ev "scan" tl3
-    (Flow.scan ~init:1000.0 (fun ~acc ~x -> acc +. x) flow)
-    [| 1100.0; 1300.0; 1600.0 |];
+  let flow = Flow.of_array [| 100.0; 200.0; 300.0 |] in
+  (* prev via at_period_start: default at period 0, then previous value *)
+  let as_balance = Balance.of_array [| 100.0; 200.0; 300.0 |] in
+  ev "prev" tl3 (Balance.sample (Balance.at_period_start as_balance ~default:0.0))
+    [| 0.0; 100.0; 200.0 |];
+  (* cumsum via roll_forward + sample *)
   ev "cumsum" tl3
-    (Flow.scan ~init:1000.0 (fun ~acc ~x -> acc +. x) flow)
+    (Balance.sample (Balance.roll_forward ~init:1000.0 flow))
     [| 1100.0; 1300.0; 1600.0 |]
 
 (* Flow: feedback *)
@@ -316,13 +317,13 @@ let test_flow_feedback () =
 (* Flow: fixpoint *)
 
 let test_flow_fixpoint () =
-  let c = Flow.unsafe_of_array [| 10.0; 20.0; 30.0 |] in
+  let c = Flow.of_array [| 10.0; 20.0; 30.0 |] in
   (* x = 0.5*(x+c) converges to x=c *)
   ev "linear" tl3
     (Flow.fixpoint ~guess:0.0 (fun x -> Flow.scale 0.5 (Flow.add x c)))
     [| 10.0; 20.0; 30.0 |];
   (* warm start: period 1 starts from period 0's converged value *)
-  let c2 = Flow.unsafe_of_array [| 10.0; 100.0; 100.0 |] in
+  let c2 = Flow.of_array [| 10.0; 100.0; 100.0 |] in
   ev "warm start" tl3
     (Flow.fixpoint ~guess:0.0 (fun x -> Flow.scale 0.5 (Flow.add x c2)))
     [| 10.0; 100.0; 100.0 |];
@@ -332,7 +333,7 @@ let test_flow_fixpoint () =
          let flow =
            Flow.fixpoint ~guess:0.0 (fun x -> Flow.scale 0.5 (Flow.add x prev_bal))
          in
-         let balance = Flow.scan ~init:100.0 (fun ~acc ~x -> acc +. x) flow in
+         let balance = Balance.sample (Balance.roll_forward ~init:100.0 flow) in
          (balance, balance)))
     [| 200.0; 400.0; 800.0 |];
   (* divergence: x = 2x+1 *)
@@ -344,7 +345,7 @@ let test_flow_fixpoint () =
              Flow.add (Flow.scale 2.0 x) (Flow.const 1.0)))));
   (* LTC construction loan: loan = ltc * (base_cost + loan*rate) *)
   let ltc = 0.8 and rate = 0.05 in
-  let base_cost = Flow.unsafe_of_array [| 1000.0; 2000.0; 3000.0 |] in
+  let base_cost = Flow.of_array [| 1000.0; 2000.0; 3000.0 |] in
   let loan =
     Flow.fixpoint ~guess:0.0 (fun commitment ->
         Flow.scale ltc (Flow.add base_cost (Flow.scale rate commitment)))
@@ -393,13 +394,13 @@ let test_flow_growth () =
 let test_query () =
   let tl = Timeline.monthly ~start_date:(date 2025 1 1) ~n:3 in
   (* accrue partial = interpolate equivalent *)
-  let s = Flow.unsafe_of_array [| 310.0; 280.0; 310.0 |] in
+  let s = Flow.of_array [| 310.0; 280.0; 310.0 |] in
   let m = Flow.eval tl s in
   fl "interp jan16"
     (310.0 *. 15.0 /. 31.0)
     (Flow.Materialized.accrue m ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 16));
   (* accrue *)
-  let vals_s = Flow.unsafe_of_array [| 100.0; 200.0; 300.0 |] in
+  let vals_s = Flow.of_array [| 100.0; 200.0; 300.0 |] in
   let vals_m = Flow.eval tl vals_s in
   fl "accrue full" 600.0
     (Flow.Materialized.accrue vals_m ~start_date:(date 2025 1 1) ~end_date:(date 2025 4 1));
@@ -412,7 +413,7 @@ let test_query () =
     (Flow.Materialized.accrue m1
        ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 16));
   (* balance_at via Balance.Materialized.at *)
-  let flow = Flow.unsafe_of_array [| 100.0; 200.0; 300.0 |] in
+  let flow = Flow.of_array [| 100.0; 200.0; 300.0 |] in
   let balance = Balance.roll_forward ~init:1000.0 flow in
   let bal_m = Balance.eval tl balance in
   fl "bal jan1" 1000.0 (Balance.Materialized.at bal_m (date 2025 1 1));
@@ -425,7 +426,7 @@ let test_query () =
 (* Materialized *)
 
 let test_materialized () =
-  let s = Flow.unsafe_of_array [| 10.0; 20.0; 30.0 |] in
+  let s = Flow.of_array [| 10.0; 20.0; 30.0 |] in
   let m = Flow.eval tl3 s in
   check int "length" 3 (Flow.Materialized.length m);
   fl "get 0" 10.0 (Flow.Materialized.get m 0);
@@ -778,7 +779,7 @@ let test_schedule () =
 let test_flow () =
   let evf msg tl f exp = fla msg exp (Flow.Materialized.to_array (Flow.eval tl f)) in
   evf "const" tl3 (Flow.const 42.0) [| 42.0; 42.0; 42.0 |];
-  evf "of_array" tl3 (Flow.unsafe_of_array [| 1.0; 2.0 |]) [| 1.0; 2.0; 0.0 |];
+  evf "of_array" tl3 (Flow.of_array [| 1.0; 2.0 |]) [| 1.0; 2.0; 0.0 |];
   evf "init" tl3
     (Flow.init (fun p -> Period.days p |> float_of_int))
     [| 31.0; 28.0; 31.0 |];
@@ -786,8 +787,8 @@ let test_flow () =
     (Flow.of_events [ (date 2025 1 10, 100.0); (date 2025 3 5, 200.0) ])
     [| 100.0; 0.0; 200.0 |];
   (* exact algebra *)
-  let a = Flow.unsafe_of_array [| 10.0; 20.0; 30.0 |] in
-  let b = Flow.unsafe_of_array [| 1.0; 2.0; 3.0 |] in
+  let a = Flow.of_array [| 10.0; 20.0; 30.0 |] in
+  let b = Flow.of_array [| 1.0; 2.0; 3.0 |] in
   evf "add" tl3 (Flow.add a b) [| 11.0; 22.0; 33.0 |];
   evf "sub" tl3 (Flow.sub a b) [| 9.0; 18.0; 27.0 |];
   evf "scale" tl3 (Flow.scale 2.0 a) [| 20.0; 40.0; 60.0 |];
@@ -832,9 +833,7 @@ let test_flow () =
   let arr = Flow.Materialized.to_array m in
   arr.(0) <- 999.0;
   fl "mat copy safe" 10.0 (Flow.Materialized.get m 0);
-  (* Materialized.make length validation *)
-  invalid "Flow.Materialized.make: array length does not match timeline length"
-    (fun () -> ignore (Flow.Materialized.make tl3 [| 1.0; 2.0 |]));
+  (* (Materialized.make is internal, no public length validation test) *)
   (* accrue: full timeline *)
   fl "accrue full" 60.0
     (Flow.Materialized.accrue m
@@ -891,26 +890,31 @@ let test_flow () =
 let test_balance () =
   let evb msg tl b exp = fla msg exp (Balance.Materialized.to_array (Balance.eval tl b)) in
   evb "const" tl3 (Balance.const 100.0) [| 100.0; 100.0; 100.0 |];
-  evb "of_array" tl3 (Balance.unsafe_of_array [| 10.0; 20.0 |]) [| 10.0; 20.0; 0.0 |];
+  evb "of_array" tl3 (Balance.of_array [| 10.0; 20.0 |]) [| 10.0; 20.0; 0.0 |];
   (* roll_forward: running sum *)
-  let flow = Flow.unsafe_of_array [| 100.0; 200.0; 300.0 |] in
+  let flow = Flow.of_array [| 100.0; 200.0; 300.0 |] in
   evb "roll_forward" tl3
     (Balance.roll_forward ~init:1000.0 flow)
     [| 1100.0; 1300.0; 1600.0 |];
-  (* roll_forward_with: custom accumulation *)
-  evb "roll_forward_with" tl3
-    (Balance.roll_forward_with ~init:1.0 (fun ~acc ~x -> acc *. x) flow)
+  (* custom accumulation via feedback *)
+  evb "custom_accum" tl3
+    (let _, bal =
+       Balance.feedback ~default:1.0 (fun prev_bal ->
+           let bal = Balance.map2 (fun prev x -> prev *. x) prev_bal
+               (Balance.of_array [| 100.0; 200.0; 300.0 |]) in
+           (bal, (bal, bal)))
+     in bal)
     [| 100.0; 20000.0; 6000000.0 |];
   (* algebra *)
-  let a = Balance.unsafe_of_array [| 10.0; 20.0; 30.0 |] in
-  let b = Balance.unsafe_of_array [| 1.0; 2.0; 3.0 |] in
+  let a = Balance.of_array [| 10.0; 20.0; 30.0 |] in
+  let b = Balance.of_array [| 1.0; 2.0; 3.0 |] in
   evb "add" tl3 (Balance.add a b) [| 11.0; 22.0; 33.0 |];
   evb "sub" tl3 (Balance.sub a b) [| 9.0; 18.0; 27.0 |];
   evb "scale" tl3 (Balance.scale 2.0 a) [| 20.0; 40.0; 60.0 |];
   evb "map" tl3 (Balance.map (fun x -> x *. x) a) [| 100.0; 400.0; 900.0 |];
   evb "map2" tl3 (Balance.map2 ( *. ) a b) [| 10.0; 40.0; 90.0 |];
   (* cross-period *)
-  evb "prev" tl3 (Balance.prev a ~default:0.0) [| 0.0; 10.0; 20.0 |];
+  evb "at_period_start=prev" tl3 (Balance.at_period_start a ~default:0.0) [| 0.0; 10.0; 20.0 |];
   evb "at_period_start" tl3 (Balance.at_period_start a ~default:0.0) [| 0.0; 10.0; 20.0 |];
   evb "at_period_end" tl3 (Balance.at_period_end a) [| 10.0; 20.0; 30.0 |];
   (* eval returns Materialized *)
@@ -931,11 +935,9 @@ let test_balance () =
   let arr = Balance.Materialized.to_array m in
   arr.(0) <- 999.0;
   fl "mat copy safe" 10.0 (Balance.Materialized.get m 0);
-  (* Materialized.make length validation *)
-  invalid "Balance.Materialized.make: array length does not match timeline length"
-    (fun () -> ignore (Balance.Materialized.make tl3 [| 1.0; 2.0 |]));
+  (* (Materialized.make is internal, no public length validation test) *)
   (* at: Series interpolation (intrinsic companion flow) *)
-  let flow = Flow.unsafe_of_array [| 100.0; 200.0; 300.0 |] in
+  let flow = Flow.of_array [| 100.0; 200.0; 300.0 |] in
   let bal = Balance.roll_forward ~init:1000.0 flow in
   let bal_m = Balance.eval tl3 bal in
   fl "at jan1" 1000.0
@@ -949,11 +951,11 @@ let test_balance () =
   fl "eval bal 0" 1100.0 (Balance.Materialized.get bal_m 0);
   fl "eval bal 2" 1600.0 (Balance.Materialized.get bal_m 2);
   (* change: balance -> flow *)
-  let bal = Balance.unsafe_of_array [| 100.0; 150.0; 120.0 |] in
+  let bal = Balance.of_array [| 100.0; 150.0; 120.0 |] in
   let chg = Balance.change bal ~default:0.0 in
   fla "change" [| 100.0; 50.0; -30.0 |] (Flow.Materialized.to_array (Flow.eval tl3 chg));
   (* roundtrip: roll_forward (change b) ~ b when default = init *)
-  let flow2 = Flow.unsafe_of_array [| 10.0; 20.0; 30.0 |] in
+  let flow2 = Flow.of_array [| 10.0; 20.0; 30.0 |] in
   let bal2 = Balance.roll_forward ~init:0.0 flow2 in
   let chg2 = Balance.change bal2 ~default:0.0 in
   fla "roundtrip change" [| 10.0; 20.0; 30.0 |] (Flow.Materialized.to_array (Flow.eval tl3 chg2));
@@ -993,17 +995,18 @@ let test_balance () =
   fl "fb bal[0]" 101.0 vb2.(0);
   fl "fb int[0]" 1.0 vi.(0);
   fl "fb int[1]" 1.01 vi.(1);
-  (* fixpoint: LTC construction loan pattern *)
+  (* fixpoint via Flow.fixpoint + Balance.of_array pattern *)
   let ltc = 0.8 and rate = 0.05 in
-  let base_cost = Balance.unsafe_of_array [| 1000.0; 2000.0; 3000.0 |] in
-  let loan =
-    Balance.fixpoint ~guess:0.0 (fun commitment ->
-        Balance.map2 (fun bc c -> ltc *. (bc +. rate *. c))
-          base_cost commitment)
+  let base_cost_arr = [| 1000.0; 2000.0; 3000.0 |] in
+  let base_cost_flow = Flow.of_array base_cost_arr in
+  let loan_flow =
+    Flow.fixpoint ~guess:0.0 (fun commitment ->
+        Flow.map2 (fun bc c -> ltc *. (bc +. rate *. c))
+          base_cost_flow commitment)
   in
-  let lv = Balance.Materialized.to_array (Balance.eval tl3 loan) in
+  let lv = Flow.Materialized.to_array (Flow.eval tl3 loan_flow) in
   let expected i =
-    let bc = [| 1000.0; 2000.0; 3000.0 |].(i) in
+    let bc = base_cost_arr.(i) in
     ltc *. bc /. (1.0 -. (ltc *. rate))
   in
   fl "fix[0]" (expected 0) lv.(0);

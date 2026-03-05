@@ -1,17 +1,14 @@
 (** Basic Income Statement
 
-    Builds on the Coffee Shop example by introducing cross-period dependencies with [Formula.prev]
+    Builds on the Coffee Shop example by introducing cross-period dependencies with [Flow.feedback]
     and custom timeline construction via [Timeline.make] + [Period.make_offset].
 
-    The dependency graph is naturally acyclic -- no delay or lazy needed -- except for services
-    revenue, which looks at the *prior* period's OpEx:
-
-    software --> cogs ---> opex_total ---> services --> revenue_total software
-    ---------------------------> --> revenue_total admin --> opex_total
+    The dependency graph is naturally acyclic except for services revenue, which looks at the
+    *prior* period's OpEx via [Flow.feedback].
 
     Key patterns demonstrated:
     - [Flow.t] for all revenue and expense line items.
-    - [Flow.prev] + [Flow.map] for cross-period dependency (via hidden internal API).
+    - [Flow.feedback] for cross-period dependency (services reads prior OpEx).
     - [Statement.flow_line] for typed statement construction. *)
 
 open Orcaset2
@@ -47,14 +44,18 @@ let opex_total = Flow.sum ~name:"OpEx Total" [ cogs; admin ]
 
 (* Revenue (Continued) *)
 
-(* Flow.prev shifts a flow forward by one period, producing ~default at
-   period 0. Combined with Flow.map, this lets services revenue depend on
-   the *prior* period's OpEx without introducing a same-period cycle.
-   Period 0 falls back to a fixed estimate since there is no prior OpEx yet. *)
-let services =
-  Flow.map ~name:"Services"
-    (fun prev_opex -> if prev_opex = 0.0 then 500.0 else prev_opex *. services_multiple_opex)
-    (Flow.prev opex_total ~default:0.0)
+(* Flow.feedback ties a cross-period dependency: services revenue depends on
+   the *prior* period's total OpEx. The feedback function receives a flow
+   representing the previous period's value (default 0.0 at period 0).
+   We feed back opex_total so that services can read the prior period. *)
+let _opex_fed_back, services =
+  Flow.feedback ~default:0.0 (fun prev_opex ->
+      let services =
+        Flow.map ~name:"Services"
+          (fun prev -> if prev = 0.0 then 500.0 else prev *. services_multiple_opex)
+          prev_opex
+      in
+      (opex_total, (opex_total, services)))
 
 let revenue_total = Flow.named "Revenue Total" (Flow.add software services)
 

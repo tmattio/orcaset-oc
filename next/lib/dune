@@ -1,2 +1,3 @@
 (library
- (name orcaset2))
+ (name orcaset2)
+ (private_modules formula))

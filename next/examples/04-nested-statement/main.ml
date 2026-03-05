@@ -58,11 +58,12 @@ let shocks =
       in
       (sum_uniforms -. 6.0) *. non_recurring_volatility)
 
-(* scan ~init feeds the previous output back as ~acc, building a running walk. *)
+(* Balance.roll_forward accumulates shocks into a running walk, then
+   Balance.sample reads each period's value back as a flow. *)
 let non_recurring_revenue =
-  Flow.scan ~name:"Non-Recurring Revenue" ~init:non_recurring_first
-    (fun ~acc ~x -> acc +. non_recurring_drift +. x)
-    shocks
+  Balance.sample ~name:"Non-Recurring Revenue"
+    (Balance.roll_forward ~init:non_recurring_first
+       (Flow.map (fun x -> non_recurring_drift +. x) shocks))
 
 (* Cost of Revenue *)
 

@@ -9,7 +9,7 @@ type balance_hint =
   | BH_observations of { sorted_obs : (Date.t * float) array; before_first : float }
   | BH_roll_forward of {
       init : float;
-      flow_eval : Timeline.t -> Flow.Materialized_internal.query_ctx * float array;
+      flow_eval : Timeline.t -> Flow.Materialized.query_ctx * float array;
     }
   | BH_add of balance_hint * balance_hint
   | BH_sub of balance_hint * balance_hint
@@ -85,7 +85,7 @@ let roll_forward ?name ~init flow =
   let formula = Formula.cumsum ?name ~init (Flow.unsafe_to_formula flow) in
   let flow_eval tl =
     let m = Flow.eval tl flow in
-    (Flow.Materialized_internal.query m, Flow.Materialized_internal.unsafe_values m)
+    (Flow.Materialized.query m, Flow.Materialized.unsafe_values m)
   in
   { formula; hint = BH_roll_forward { init; flow_eval } }
 
@@ -201,6 +201,7 @@ let convert ~rate s =
 let unsafe_to_formula b = b.formula
 let unsafe_of_formula s = { formula = s; hint = BH_no_hint }
 let unsafe_of_array ?name arr = mk (Formula.of_array ?name arr)
+let of_array = unsafe_of_array
 
 (* Materialized *)
 
@@ -214,7 +215,7 @@ module Materialized = struct
         init : float;
         balance_values : float array;
         flow_values : float array;
-        flow_query : Flow.Materialized_internal.query_ctx;
+        flow_query : Flow.Materialized.query_ctx;
         timeline : Timeline.t;
       }
     | BQ_add of balance_query * balance_query
@@ -299,7 +300,7 @@ module Materialized = struct
             let p = Timeline.get timeline i in
             let flow_to_date =
               match
-                Flow.Materialized_internal.accrue_via_ctx flow_query
+                Flow.Materialized.accrue_via_ctx flow_query
                   ~start_date:(Period.start_date p) ~end_date:date
               with
               | v -> v
