@@ -48,9 +48,7 @@ type 'a item =
 (** {1:series Series} *)
 
 (** The type for statement series. Preserves the flow/balance distinction until evaluation. *)
-type 'c series =
-  | Flow : 'c Flow.t -> 'c series
-  | Balance : 'c Balance.t -> 'c series
+type 'c series = Flow : 'c Flow.t -> 'c series | Balance : 'c Balance.t -> 'c series
 
 val flow : 'c Flow.t -> 'c series
 (** [flow f] is [Flow f]. *)
@@ -66,8 +64,8 @@ val line : string -> 'a -> 'a item
 val group : ?total:'a -> string -> 'a item list -> 'a item
 (** [group ?total label items] is [Group {label; items; total}].
 
-    When [total] is omitted, {!eval} will synthesize one by summing the direct children's data —
-    but only when all children are the same kind. Mixed children (flows and balances together) skip
+    When [total] is omitted, {!eval} will synthesize one by summing the direct children's data — but
+    only when all children are the same kind. Mixed children (flows and balances together) skip
     auto-total. Supply an explicit [total] to override this. *)
 
 val flow_line : string -> 'c Flow.t -> 'c series item
@@ -79,10 +77,8 @@ val balance_line : string -> 'c Balance.t -> 'c series item
 val flow_group : ?total:'c Flow.t -> string -> 'c series item list -> 'c series item
 (** [flow_group ?total label items] is [group ?total:(Option.map flow total) label items]. *)
 
-val balance_group :
-  ?total:'c Balance.t -> string -> 'c series item list -> 'c series item
-(** [balance_group ?total label items] is
-    [group ?total:(Option.map balance total) label items]. *)
+val balance_group : ?total:'c Balance.t -> string -> 'c series item list -> 'c series item
+(** [balance_group ?total label items] is [group ?total:(Option.map balance total) label items]. *)
 
 (** {1:traversal Traversal} *)
 

@@ -203,8 +203,7 @@ let of_events ?name events =
                    | Some idx -> bins.(idx) <- bins.(idx) +. v
                    | None ->
                        invalid_arg
-                         (Printf.sprintf
-                            "Formula.of_events: event date %s is outside the timeline"
+                         (Printf.sprintf "Formula.of_events: event date %s is outside the timeline"
                             (Date.to_string d)))
                  events;
                cache := Some (tl, bins);
@@ -229,7 +228,9 @@ let convert ~rate s = scale rate s
    decrease the period index. *)
 
 exception Cycle_error of { formula_name : string option; period_index : int }
-exception Convergence_error of { formula_name : string option; period_index : int; iterations : int }
+
+exception
+  Convergence_error of { formula_name : string option; period_index : int; iterations : int }
 
 type cell_state = In_progress | Done of float
 type eval_ctx = { tl : Timeline.t; n : int; memo : (int, cell_state) Hashtbl.t }

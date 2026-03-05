@@ -113,9 +113,7 @@ let build_property (a : assumptions) =
         let gpr = Flow.sum ~name:"GPR" [ base_rent; parking; cam_recoveries; other_income ] in
         let vacancy_loss = Flow.named "Vacancy Loss" (Flow.scale (-.a.vacancy_rate) gpr) in
         let egi = Flow.named "EGI" (Flow.add gpr vacancy_loss) in
-        let management =
-          Flow.map ~name:"Management" (fun e -> -.e *. a.management_fee_pct) egi
-        in
+        let management = Flow.map ~name:"Management" (fun e -> -.e *. a.management_fee_pct) egi in
         let opex_total =
           Flow.sum ~name:"Total OpEx"
             [
@@ -129,17 +127,14 @@ let build_property (a : assumptions) =
               security;
             ]
         in
-        (opex_total,
-         (cam_recoveries, gpr, vacancy_loss, egi, management, opex_total)))
+        (opex_total, (cam_recoveries, gpr, vacancy_loss, egi, management, opex_total)))
   in
 
   (* NOI *)
   let noi = Flow.named "NOI" (Flow.add egi opex_total) in
 
   (* CapEx *)
-  let capital_reserves =
-    Flow.map ~name:"Capital Reserves" (fun e -> -.e *. a.reserve_pct) egi
-  in
+  let capital_reserves = Flow.map ~name:"Capital Reserves" (fun e -> -.e *. a.reserve_pct) egi in
   let ti =
     Flow.const ~name:"Tenant Improvements" (-.(a.ti_per_sf_annual *. a.building_sf /. 12.0))
   in

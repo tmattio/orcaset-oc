@@ -219,17 +219,16 @@ let test_flow_constructors () =
   ev "init days" tl3
     (Flow.init_indexed (fun _i p -> Period.days p |> float_of_int))
     [| 31.0; 28.0; 31.0 |];
-  ev "init" tl3
-    (Flow.init (fun p -> Period.days p |> float_of_int))
-    [| 31.0; 28.0; 31.0 |];
+  ev "init" tl3 (Flow.init (fun p -> Period.days p |> float_of_int)) [| 31.0; 28.0; 31.0 |];
   (* of_events: aggregation, boundary placement, outside-timeline drop *)
   ev "of_events" tl3
     (Flow.of_events [ (date 2025 1 10, 100.0); (date 2025 1 20, 50.0); (date 2025 3 5, 200.0) ])
     [| 150.0; 0.0; 200.0 |];
   ev "boundary" tl3 (Flow.of_events [ (date 2025 2 1, 100.0) ]) [| 0.0; 100.0; 0.0 |];
-  invalid "Formula.of_events: event date 2024-01-01 is outside the timeline"
-    (fun () -> ignore (Flow.Materialized.to_array (Flow.eval tl3
-      (Flow.of_events [ (date 2024 1 1, 999.0); (date 2025 1 15, 100.0) ]))));
+  invalid "Formula.of_events: event date 2024-01-01 is outside the timeline" (fun () ->
+      ignore
+        (Flow.Materialized.to_array
+           (Flow.eval tl3 (Flow.of_events [ (date 2024 1 1, 999.0); (date 2025 1 15, 100.0) ]))));
   (* of_events: evaluated against a timeline that contains all events *)
   let tl_long = Timeline.monthly ~start_date:(date 2025 1 1) ~n:6 in
   ev "cross-tl long" tl_long
@@ -269,7 +268,8 @@ let test_flow_cross_period () =
   let flow = Flow.of_array [| 100.0; 200.0; 300.0 |] in
   (* prev via at_period_start: default at period 0, then previous value *)
   let as_balance = Balance.of_array [| 100.0; 200.0; 300.0 |] in
-  ev "prev" tl3 (Balance.sample (Balance.at_period_start as_balance ~default:0.0))
+  ev "prev" tl3
+    (Balance.sample (Balance.at_period_start as_balance ~default:0.0))
     [| 0.0; 100.0; 200.0 |];
   (* cumsum via roll_forward + sample *)
   ev "cumsum" tl3
@@ -330,9 +330,7 @@ let test_flow_fixpoint () =
   (* fixpoint + feedback: flow converges to prev balance each period *)
   ev "fixpoint+feedback" tl3
     (Flow.feedback ~default:100.0 (fun prev_bal ->
-         let flow =
-           Flow.fixpoint ~guess:0.0 (fun x -> Flow.scale 0.5 (Flow.add x prev_bal))
-         in
+         let flow = Flow.fixpoint ~guess:0.0 (fun x -> Flow.scale 0.5 (Flow.add x prev_bal)) in
          let balance = Balance.sample (Balance.roll_forward ~init:100.0 flow) in
          (balance, balance)))
     [| 200.0; 400.0; 800.0 |];
@@ -340,9 +338,10 @@ let test_flow_fixpoint () =
   raises "diverges"
     (Flow.Convergence_error { formula_name = Some "divergent"; period_index = 0; iterations = 5 })
     (fun () ->
-      Flow.Materialized.to_array (Flow.eval tl3
-        (Flow.fixpoint ~name:"divergent" ~max_iter:5 ~guess:0.0 (fun x ->
-             Flow.add (Flow.scale 2.0 x) (Flow.const 1.0)))));
+      Flow.Materialized.to_array
+        (Flow.eval tl3
+           (Flow.fixpoint ~name:"divergent" ~max_iter:5 ~guess:0.0 (fun x ->
+                Flow.add (Flow.scale 2.0 x) (Flow.const 1.0)))));
   (* LTC construction loan: loan = ltc * (base_cost + loan*rate) *)
   let ltc = 0.8 and rate = 0.05 in
   let base_cost = Flow.of_array [| 1000.0; 2000.0; 3000.0 |] in
@@ -368,19 +367,25 @@ let test_flow_growth () =
     (Flow.growth_simple ~start_date:sd ~rate:0.0 1000.0)
     [| 1000.0; 1000.0; 1000.0 |];
   (* simple growth: monotonically increasing *)
-  let v = Flow.Materialized.to_array (Flow.eval tl3 (Flow.growth_simple ~start_date:sd ~rate:1.0 1000.0)) in
+  let v =
+    Flow.Materialized.to_array (Flow.eval tl3 (Flow.growth_simple ~start_date:sd ~rate:1.0 1000.0))
+  in
   fl "simple p0" 1000.0 v.(0);
   check bool "simple grows" true (v.(2) > v.(1));
   (* simple growth with calendar_monthly daycount *)
   let v =
-    Flow.Materialized.to_array (Flow.eval tl3
-      (Flow.growth_simple ~start_date:sd ~rate:1.0 ~daycount:Daycount.calendar_monthly 1200.0))
+    Flow.Materialized.to_array
+      (Flow.eval tl3
+         (Flow.growth_simple ~start_date:sd ~rate:1.0 ~daycount:Daycount.calendar_monthly 1200.0))
   in
   fl "cm p0" 1200.0 v.(0);
   let yf1 = Daycount.calendar_monthly sd (date 2025 2 1) in
   fl "cm p1" (1200.0 *. (1.0 +. yf1)) v.(1);
   (* compound growth *)
-  let v = Flow.Materialized.to_array (Flow.eval tl3 (Flow.growth_compound ~start_date:sd ~rate:0.10 1000.0)) in
+  let v =
+    Flow.Materialized.to_array
+      (Flow.eval tl3 (Flow.growth_compound ~start_date:sd ~rate:0.10 1000.0))
+  in
   fl "compound p0" 1000.0 v.(0);
   let yf2 = Daycount.actual_360 sd (date 2025 3 1) in
   fl "compound p2" (1000.0 *. ((1.0 +. 0.10) ** yf2)) v.(2);
@@ -410,8 +415,7 @@ let test_query () =
   let m1 = Flow.eval tl1 (Flow.const 310.0) in
   fl "accrue partial"
     (310.0 *. 15.0 /. 31.0)
-    (Flow.Materialized.accrue m1
-       ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 16));
+    (Flow.Materialized.accrue m1 ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 16));
   (* balance_at via Balance.Materialized.at *)
   let flow = Flow.of_array [| 100.0; 200.0; 300.0 |] in
   let balance = Balance.roll_forward ~init:1000.0 flow in
@@ -420,8 +424,8 @@ let test_query () =
   fl "bal feb15"
     (1100.0 +. (200.0 *. 14.0 /. 28.0))
     (Balance.Materialized.at bal_m (date 2025 2 15));
-  invalid "Balance.Materialized.at: date 2024-01-01 is outside the timeline"
-    (fun () -> ignore (Balance.Materialized.at bal_m (date 2024 1 1)))
+  invalid "Balance.Materialized.at: date 2024-01-01 is outside the timeline" (fun () ->
+      ignore (Balance.Materialized.at bal_m (date 2024 1 1)))
 
 (* Materialized *)
 
@@ -434,9 +438,7 @@ let test_materialized () =
   ds "period 0 start" "2025-01-01" (Period.start_date (Flow.Materialized.period m 0));
   let pairs = Flow.Materialized.to_list m in
   check int "to_list len" 3 (List.length pairs);
-  let sum =
-    Flow.Materialized.fold (fun acc _p v -> acc +. v) 0.0 m
-  in
+  let sum = Flow.Materialized.fold (fun acc _p v -> acc +. v) 0.0 m in
   fl "fold sum" 60.0 sum;
   let count = ref 0 in
   Flow.Materialized.iter (fun _p _v -> incr count) m;
@@ -500,8 +502,7 @@ let test_statement () =
   in
   let out =
     to_s (fun ppf ->
-        Statement.pp l ppf
-          (Statement.eval tl2 (Statement.flow_line "Test" (Flow.const 42.0))))
+        Statement.pp l ppf (Statement.eval tl2 (Statement.flow_line "Test" (Flow.const 42.0))))
   in
   check bool "custom P0" true (has "P0" out);
   check bool "custom sep" true (has "=====" out);
@@ -515,11 +516,7 @@ let test_statement () =
   let result = Statement.eval tl3 stmt in
   check int "mixed lines" 2 (List.length (Statement.lines result));
   (* mixed group: no auto_total generated *)
-  (match
-     Statement.fold result
-       ~line_fn:(fun _ _ -> None)
-       ~group_fn:(fun _ _ total -> total)
-   with
+  (match Statement.fold result ~line_fn:(fun _ _ -> None) ~group_fn:(fun _ _ total -> total) with
   | None -> () (* correct: mixed children skip auto_total *)
   | Some _ -> fail "mixed group should not have auto_total");
   (* flow_group with explicit total *)
@@ -539,8 +536,10 @@ let test_statement () =
   (* balance_group auto_total *)
   let bal_stmt =
     Statement.group "Balances"
-      [ Statement.balance_line "A" (Balance.const 100.0);
-        Statement.balance_line "B" (Balance.const 200.0) ]
+      [
+        Statement.balance_line "A" (Balance.const 100.0);
+        Statement.balance_line "B" (Balance.const 200.0);
+      ]
   in
   (match
      Statement.fold (Statement.eval tl3 bal_stmt)
@@ -780,9 +779,7 @@ let test_flow () =
   let evf msg tl f exp = fla msg exp (Flow.Materialized.to_array (Flow.eval tl f)) in
   evf "const" tl3 (Flow.const 42.0) [| 42.0; 42.0; 42.0 |];
   evf "of_array" tl3 (Flow.of_array [| 1.0; 2.0 |]) [| 1.0; 2.0; 0.0 |];
-  evf "init" tl3
-    (Flow.init (fun p -> Period.days p |> float_of_int))
-    [| 31.0; 28.0; 31.0 |];
+  evf "init" tl3 (Flow.init (fun p -> Period.days p |> float_of_int)) [| 31.0; 28.0; 31.0 |];
   evf "of_events" tl3
     (Flow.of_events [ (date 2025 1 10, 100.0); (date 2025 3 5, 200.0) ])
     [| 100.0; 0.0; 200.0 |];
@@ -799,22 +796,16 @@ let test_flow () =
   (* of_periods: exact match *)
   let p0 = Timeline.get tl3 0 in
   let p2 = Timeline.get tl3 2 in
-  evf "of_periods" tl3
-    (Flow.of_periods [ (p0, 100.0); (p2, 300.0) ])
-    [| 100.0; 0.0; 300.0 |];
+  evf "of_periods" tl3 (Flow.of_periods [ (p0, 100.0); (p2, 300.0) ]) [| 100.0; 0.0; 300.0 |];
   (* of_periods: multiple values for same period sum *)
-  evf "of_periods sum" tl3
-    (Flow.of_periods [ (p0, 40.0); (p0, 60.0) ])
-    [| 100.0; 0.0; 0.0 |];
+  evf "of_periods sum" tl3 (Flow.of_periods [ (p0, 40.0); (p0, 60.0) ]) [| 100.0; 0.0; 0.0 |];
   (* of_periods: unmatched period produces 0 *)
   let foreign = Period.make ~start_date:(date 2099 1 1) ~end_date:(date 2099 2 1) in
-  evf "of_periods unmatched" tl3
-    (Flow.of_periods [ (foreign, 999.0) ])
-    [| 0.0; 0.0; 0.0 |];
+  evf "of_periods unmatched" tl3 (Flow.of_periods [ (foreign, 999.0) ]) [| 0.0; 0.0; 0.0 |];
   (* of_events: out-of-range raises *)
-  invalid "Formula.of_events: event date 2024-01-01 is outside the timeline"
-    (fun () -> ignore (Flow.Materialized.to_array (Flow.eval tl3
-      (Flow.of_events [ (date 2024 1 1, 100.0) ]))));
+  invalid "Formula.of_events: event date 2024-01-01 is outside the timeline" (fun () ->
+      ignore
+        (Flow.Materialized.to_array (Flow.eval tl3 (Flow.of_events [ (date 2024 1 1, 100.0) ]))));
   (* eval returns Materialized *)
   let m = Flow.eval tl3 a in
   check int "mat length" 3 (Flow.Materialized.length m);
@@ -836,54 +827,44 @@ let test_flow () =
   (* (Materialized.make is internal, no public length validation test) *)
   (* accrue: full timeline *)
   fl "accrue full" 60.0
-    (Flow.Materialized.accrue m
-       ~start_date:(date 2025 1 1) ~end_date:(date 2025 4 1));
+    (Flow.Materialized.accrue m ~start_date:(date 2025 1 1) ~end_date:(date 2025 4 1));
   (* accrue: single period *)
   fl "accrue feb" 20.0
-    (Flow.Materialized.accrue m
-       ~start_date:(date 2025 2 1) ~end_date:(date 2025 3 1));
+    (Flow.Materialized.accrue m ~start_date:(date 2025 2 1) ~end_date:(date 2025 3 1));
   (* accrue: partial period pro-rata *)
   let m1 = Flow.eval (Timeline.monthly ~start_date:(date 2025 1 1) ~n:1) (Flow.const 310.0) in
   fl "accrue partial"
     (310.0 *. 15.0 /. 31.0)
-    (Flow.Materialized.accrue m1
-       ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 16));
+    (Flow.Materialized.accrue m1 ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 16));
   (* accrue: non-overlapping range returns 0.0 *)
   fl "accrue outside" 0.0
-    (Flow.Materialized.accrue m
-       ~start_date:(date 2024 1 1) ~end_date:(date 2024 2 1));
+    (Flow.Materialized.accrue m ~start_date:(date 2024 1 1) ~end_date:(date 2024 2 1));
   (* of_periods: overlap-based splitting *)
   let wide_period = Period.make ~start_date:(date 2025 1 1) ~end_date:(date 2025 3 1) in
-  evf "of_periods overlap" tl3
-    (Flow.of_periods [ (wide_period, 590.0) ])
-    [| 310.0; 280.0; 0.0 |];
+  evf "of_periods overlap" tl3 (Flow.of_periods [ (wide_period, 590.0) ]) [| 310.0; 280.0; 0.0 |];
   (* accrue with events provenance: exact date filtering *)
-  let evt_flow = Flow.of_events [ (date 2025 1 10, 100.0); (date 2025 1 20, 50.0);
-                                   (date 2025 2 5, 200.0) ] in
+  let evt_flow =
+    Flow.of_events [ (date 2025 1 10, 100.0); (date 2025 1 20, 50.0); (date 2025 2 5, 200.0) ]
+  in
   let evt_m = Flow.eval tl3 evt_flow in
   fl "accrue events exact" 150.0
-    (Flow.Materialized.accrue evt_m
-       ~start_date:(date 2025 1 1) ~end_date:(date 2025 2 1));
+    (Flow.Materialized.accrue evt_m ~start_date:(date 2025 1 1) ~end_date:(date 2025 2 1));
   fl "accrue events partial" 100.0
-    (Flow.Materialized.accrue evt_m
-       ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 15));
+    (Flow.Materialized.accrue evt_m ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 15));
   (* accrue with source_periods provenance *)
   let sp_flow = Flow.of_periods [ (wide_period, 590.0) ] in
   let sp_m = Flow.eval tl3 sp_flow in
   fl "accrue source_periods" 310.0
-    (Flow.Materialized.accrue sp_m
-       ~start_date:(date 2025 1 1) ~end_date:(date 2025 2 1));
+    (Flow.Materialized.accrue sp_m ~start_date:(date 2025 1 1) ~end_date:(date 2025 2 1));
   (* accrue with algebra composition preserves provenance *)
   let sum_flow = Flow.add evt_flow sp_flow in
   let sum_m = Flow.eval tl3 sum_flow in
   fl "accrue algebra" (150.0 +. 310.0)
-    (Flow.Materialized.accrue sum_m
-       ~start_date:(date 2025 1 1) ~end_date:(date 2025 2 1));
+    (Flow.Materialized.accrue sum_m ~start_date:(date 2025 1 1) ~end_date:(date 2025 2 1));
   (* accrue scale provenance *)
   let scaled_m = Flow.eval tl3 (Flow.scale 2.0 evt_flow) in
   fl "accrue scale" 300.0
-    (Flow.Materialized.accrue scaled_m
-       ~start_date:(date 2025 1 1) ~end_date:(date 2025 2 1))
+    (Flow.Materialized.accrue scaled_m ~start_date:(date 2025 1 1) ~end_date:(date 2025 2 1))
 
 (* Balance *)
 
@@ -893,17 +874,20 @@ let test_balance () =
   evb "of_array" tl3 (Balance.of_array [| 10.0; 20.0 |]) [| 10.0; 20.0; 0.0 |];
   (* roll_forward: running sum *)
   let flow = Flow.of_array [| 100.0; 200.0; 300.0 |] in
-  evb "roll_forward" tl3
-    (Balance.roll_forward ~init:1000.0 flow)
-    [| 1100.0; 1300.0; 1600.0 |];
+  evb "roll_forward" tl3 (Balance.roll_forward ~init:1000.0 flow) [| 1100.0; 1300.0; 1600.0 |];
   (* custom accumulation via feedback *)
   evb "custom_accum" tl3
     (let _, bal =
        Balance.feedback ~default:1.0 (fun prev_bal ->
-           let bal = Balance.map2 (fun prev x -> prev *. x) prev_bal
-               (Balance.of_array [| 100.0; 200.0; 300.0 |]) in
+           let bal =
+             Balance.map2
+               (fun prev x -> prev *. x)
+               prev_bal
+               (Balance.of_array [| 100.0; 200.0; 300.0 |])
+           in
            (bal, (bal, bal)))
-     in bal)
+     in
+     bal)
     [| 100.0; 20000.0; 6000000.0 |];
   (* algebra *)
   let a = Balance.of_array [| 10.0; 20.0; 30.0 |] in
@@ -940,13 +924,9 @@ let test_balance () =
   let flow = Flow.of_array [| 100.0; 200.0; 300.0 |] in
   let bal = Balance.roll_forward ~init:1000.0 flow in
   let bal_m = Balance.eval tl3 bal in
-  fl "at jan1" 1000.0
-    (Balance.Materialized.at bal_m (date 2025 1 1));
-  fl "at feb15"
-    (1100.0 +. (200.0 *. 14.0 /. 28.0))
-    (Balance.Materialized.at bal_m (date 2025 2 15));
-  fl "at end" 1600.0
-    (Balance.Materialized.at bal_m (date 2025 4 1));
+  fl "at jan1" 1000.0 (Balance.Materialized.at bal_m (date 2025 1 1));
+  fl "at feb15" (1100.0 +. (200.0 *. 14.0 /. 28.0)) (Balance.Materialized.at bal_m (date 2025 2 15));
+  fl "at end" 1600.0 (Balance.Materialized.at bal_m (date 2025 4 1));
   (* eval: values are correct *)
   fl "eval bal 0" 1100.0 (Balance.Materialized.get bal_m 0);
   fl "eval bal 2" 1600.0 (Balance.Materialized.get bal_m 2);
@@ -980,9 +960,10 @@ let test_balance () =
     (Balance.of_observations [ (date 2025 1 15, 100.0); (date 2025 2 10, 200.0) ])
     [| 100.0; 200.0; 200.0 |];
   (* of_dates: out-of-range raises *)
-  invalid "Balance.of_dates: observation date 2024-01-01 is outside the timeline"
-    (fun () -> ignore (Balance.Materialized.to_array (Balance.eval tl3
-      (Balance.of_dates [ (date 2024 1 1, 100.0) ]))));
+  invalid "Balance.of_dates: observation date 2024-01-01 is outside the timeline" (fun () ->
+      ignore
+        (Balance.Materialized.to_array
+           (Balance.eval tl3 (Balance.of_dates [ (date 2024 1 1, 100.0) ]))));
   (* feedback: interest accrual on previous balance *)
   let balance2, interest =
     Balance.feedback ~default:100.0 (fun prev_bal ->
@@ -1001,8 +982,7 @@ let test_balance () =
   let base_cost_flow = Flow.of_array base_cost_arr in
   let loan_flow =
     Flow.fixpoint ~guess:0.0 (fun commitment ->
-        Flow.map2 (fun bc c -> ltc *. (bc +. rate *. c))
-          base_cost_flow commitment)
+        Flow.map2 (fun bc c -> ltc *. (bc +. (rate *. c))) base_cost_flow commitment)
   in
   let lv = Flow.Materialized.to_array (Flow.eval tl3 loan_flow) in
   let expected i =
@@ -1125,8 +1105,7 @@ let test_scope () =
   Scope.define s3 kz 1;
   Scope.define s4 kz 2;
   let ambig = Scope.create ~imports:[ s3; s4 ] () in
-  invalid "Scope.find: key Z is ambiguous across imports"
-    (fun () -> ignore (Scope.find ambig kz));
+  invalid "Scope.find: key Z is ambiguous across imports" (fun () -> ignore (Scope.find ambig kz));
   (* local shadows import *)
   let sl = Scope.create ~imports:[ s3 ] () in
   Scope.define sl kz 99;
@@ -1145,15 +1124,15 @@ let () =
       ("Calendar", [ test_case "calendar" `Quick test_calendar ]);
       ("Schedule", [ test_case "schedule" `Quick test_schedule ]);
       ( "Flow combinators",
-         [
-           test_case "constructors" `Quick test_flow_constructors;
-           test_case "pointwise" `Quick test_flow_pointwise;
-           test_case "cross-period" `Quick test_flow_cross_period;
-           test_case "feedback" `Quick test_flow_feedback;
-           test_case "fixpoint" `Quick test_flow_fixpoint;
-           test_case "growth" `Quick test_flow_growth;
-           test_case "query" `Quick test_query;
-         ] );
+        [
+          test_case "constructors" `Quick test_flow_constructors;
+          test_case "pointwise" `Quick test_flow_pointwise;
+          test_case "cross-period" `Quick test_flow_cross_period;
+          test_case "feedback" `Quick test_flow_feedback;
+          test_case "fixpoint" `Quick test_flow_fixpoint;
+          test_case "growth" `Quick test_flow_growth;
+          test_case "query" `Quick test_query;
+        ] );
       ("Materialized", [ test_case "materialized" `Quick test_materialized ]);
       ("Statement", [ test_case "statement" `Quick test_statement ]);
       ("Deps", [ test_case "deps" `Quick test_deps ]);

@@ -58,8 +58,8 @@ val of_periods : Period.t array -> t
     @raise Invalid_argument if [ps] is empty, overlapping, or has gaps. *)
 
 val unsafe_of_periods : Period.t array -> t
-(** [unsafe_of_periods ps] creates a timeline without validating order or contiguity. Use when
-    the caller has already ensured the invariants (e.g. periods from {!Schedule.to_timeline}).
+(** [unsafe_of_periods ps] creates a timeline without validating order or contiguity. Use when the
+    caller has already ensured the invariants (e.g. periods from {!Schedule.to_timeline}).
 
     @raise Invalid_argument if [ps] is empty. *)
 

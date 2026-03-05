@@ -44,8 +44,8 @@ val define : t -> 'a Key.t -> 'a -> unit
 val seal : t -> unit
 (** [seal scope] freezes [scope]. Subsequent calls to {!define} raise.
 
-    Raises [Invalid_argument] if any imported scope is not sealed.
-    Raises [Invalid_argument] if any key is ambiguous across the import graph. *)
+    Raises [Invalid_argument] if any imported scope is not sealed. Raises [Invalid_argument] if any
+    key is ambiguous across the import graph. *)
 
 (** {1:lookup Lookup} *)
 
@@ -53,8 +53,8 @@ val find : t -> 'a Key.t -> 'a
 (** [find scope key] is the value registered under [key]. Searches this scope first, then the
     imported scopes transitively.
 
-    Raises [Invalid_argument] if [key] is not defined anywhere in the import chain.
-    Raises [Invalid_argument] if [key] is ambiguous across multiple imports. *)
+    Raises [Invalid_argument] if [key] is not defined anywhere in the import chain. Raises
+    [Invalid_argument] if [key] is ambiguous across multiple imports. *)
 
 val find_opt : t -> 'a Key.t -> 'a option
 (** [find_opt scope key] is [Some v] if [key] is defined, [None] otherwise. Searches the import

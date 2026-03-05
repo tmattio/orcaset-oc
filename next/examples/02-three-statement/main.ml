@@ -77,8 +77,12 @@ let common_stock = Balance.const ~name:"Common Stock" common_stock_amount
 (* Derived so the balance sheet balances at t=0: assets - equity = retained earnings *)
 let initial_re = initial_cash +. initial_ppe -. common_stock_amount
 let retained_earnings = Balance.roll_forward ~name:"Retained Earnings" ~init:initial_re net_income
-let total_liabilities_equity = Balance.named "Total L&E" (Balance.add common_stock retained_earnings)
-let balance_check = Balance.named "Balance Check" (Balance.sub total_assets total_liabilities_equity)
+
+let total_liabilities_equity =
+  Balance.named "Total L&E" (Balance.add common_stock retained_earnings)
+
+let balance_check =
+  Balance.named "Balance Check" (Balance.sub total_assets total_liabilities_equity)
 
 (* Statements *)
 

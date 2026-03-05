@@ -47,17 +47,13 @@ let gen_forward offset roll ~start_date ~end_date =
   in
   collect 1 [ start_date ]
 
-let merge_first = function
-  | a :: _ :: rest when rest <> [] -> a :: rest
-  | dates -> dates
+let merge_first = function a :: _ :: rest when rest <> [] -> a :: rest | dates -> dates
 
 let merge_last dates =
   let arr = Array.of_list dates in
   let n = Array.length arr in
   if n < 3 then dates
-  else
-    Array.to_list (Array.init (n - 1) (fun i ->
-        if i < n - 2 then arr.(i) else arr.(n - 1)))
+  else Array.to_list (Array.init (n - 1) (fun i -> if i < n - 2 then arr.(i) else arr.(n - 1)))
 
 (* Construction *)
 
@@ -65,9 +61,7 @@ let make ~start_date ~end_date ~offset ?(roll = Same_day) ?(stub = Short_first)
     ?(bdc = Calendar.Unadjusted) ?(calendar = Calendar.weekdays) () =
   if Date.(end_date <= start_date) then
     invalid_arg "Schedule.make: end_date must be after start_date";
-  let total_months =
-    offset.Period.months + (offset.quarters * 3) + (offset.years * 12)
-  in
+  let total_months = offset.Period.months + (offset.quarters * 3) + (offset.years * 12) in
   let total_days = offset.days + (offset.weeks * 7) in
   if total_months <= 0 && total_days <= 0 then
     invalid_arg "Schedule.make: offset must advance by at least one day or month";
@@ -111,8 +105,8 @@ let to_unadjusted_timeline s = Timeline.unsafe_of_periods (unadjusted_periods s)
 let to_events ~at f s =
   let ps = periods s in
   List.init (Array.length ps) (fun i ->
-    let d = match at with `Start -> Period.start_date ps.(i) | `End -> Period.end_date ps.(i) in
-    (d, f i ps.(i)))
+      let d = match at with `Start -> Period.start_date ps.(i) | `End -> Period.end_date ps.(i) in
+      (d, f i ps.(i)))
 
 (* Formatting *)
 

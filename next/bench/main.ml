@@ -237,9 +237,7 @@ let proforma_bench =
   fun n () ->
     let start = Date.make 2023 1 1 in
     let tl = Timeline.monthly ~start_date:start ~n in
-    let growing ~name ~rate initial =
-      Flow.growth_simple ~name ~start_date:start ~rate initial
-    in
+    let growing ~name ~rate initial = Flow.growth_simple ~name ~start_date:start ~rate initial in
     let base_rent_monthly = building_sf *. base_rent_per_sf_year1 /. 12.0 in
     let parking_monthly = float_of_int parking_spaces *. parking_rate_monthly in
     (* Revenue *)

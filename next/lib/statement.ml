@@ -9,13 +9,10 @@ type 'a item =
   | Line of { label : string; data : 'a }
   | Group of { label : string; items : 'a item list; total : 'a option }
 
-type 'c series =
-  | Flow : 'c Flow.t -> 'c series
-  | Balance : 'c Balance.t -> 'c series
+type 'c series = Flow : 'c Flow.t -> 'c series | Balance : 'c Balance.t -> 'c series
 
 let line label data = Line { label; data }
 let group ?total label items = Group { label; items; total }
-
 let flow f = Flow f
 let balance b = Balance b
 
@@ -25,9 +22,7 @@ let to_formula : type c. c series -> c Formula.t = function
 
 let flow_line label f = Line { label; data = Flow f }
 let balance_line label b = Line { label; data = Balance b }
-
-let flow_group ?total label items =
-  group ?total:(Option.map (fun t -> Flow t) total) label items
+let flow_group ?total label items = group ?total:(Option.map (fun t -> Flow t) total) label items
 
 let balance_group ?total label items =
   group ?total:(Option.map (fun t -> Balance t) total) label items
@@ -70,29 +65,19 @@ type kind = All_flows | All_balances | Mixed
 let classify_children items =
   let tags =
     List.filter_map
-      (fun item ->
-        match item with
-        | Line { data; _ } -> Some data
-        | Group { total; _ } -> total)
+      (fun item -> match item with Line { data; _ } -> Some data | Group { total; _ } -> total)
       items
   in
   match tags with
   | [] -> Mixed
   | first :: rest ->
-      let tag = function
-        | Flow _ -> `F
-        | Balance _ -> `B
-      in
+      let tag = function Flow _ -> `F | Balance _ -> `B in
       let t = tag first in
       if List.for_all (fun s -> tag s = t) rest then
-        match t with
-        | `F -> All_flows
-        | `B -> All_balances
+        match t with `F -> All_flows | `B -> All_balances
       else Mixed
 
-let direct_data_formula = function
-  | Line { data; _ } -> Some data
-  | Group { total; _ } -> total
+let direct_data_formula = function Line { data; _ } -> Some data | Group { total; _ } -> total
 
 let rec auto_total : type c. c series item -> c Formula.t item = function
   | Line { label; data } -> Line { label; data = to_formula data }
@@ -106,8 +91,7 @@ let rec auto_total : type c. c series item -> c Formula.t item = function
         | None -> (
             match List.filter_map direct_data_formula converted with
             | [] -> None
-            | child_formulas ->
-                Some (Formula.sum ~name:("Total " ^ label) child_formulas))
+            | child_formulas -> Some (Formula.sum ~name:("Total " ^ label) child_formulas))
       in
       Group { label; items = converted; total }
 

@@ -8,8 +8,8 @@
     - {!Schedule.make} with roll and BDC conventions
     - [Balance.feedback] for loan amortization on the schedule's own timeline
     - Interest accrual from unadjusted periods
-    - Quarterly payments bridged to the monthly model via {!Schedule.to_events} +
-      {!Flow.of_events} *)
+    - Quarterly payments bridged to the monthly model via {!Schedule.to_events} + {!Flow.of_events}
+*)
 
 open Orcaset2
 
@@ -60,8 +60,7 @@ let loan_balance, (interest_pmt, principal_pmt) =
   Balance.feedback ~name:"Loan Balance" ~default:loan_amount (fun prev_bal ->
       let interest =
         Flow.named "Interest"
-          (Flow.scale (-.annual_rate)
-             (Flow.mul (Balance.sample prev_bal) accrual_yf))
+          (Flow.scale (-.annual_rate) (Flow.mul (Balance.sample prev_bal) accrual_yf))
       in
       let principal = Flow.named "Principal" (Flow.sub total_pmt interest) in
       let balance = Balance.roll_forward ~init:loan_amount principal in
@@ -75,9 +74,7 @@ let bridge_to_monthly name flow =
 
 let monthly_interest = bridge_to_monthly "Loan Interest" interest_pmt
 let monthly_principal = bridge_to_monthly "Loan Principal" principal_pmt
-
-let monthly_debt_service =
-  Flow.named "Debt Service" (Flow.add monthly_interest monthly_principal)
+let monthly_debt_service = Flow.named "Debt Service" (Flow.add monthly_interest monthly_principal)
 
 (* Operating Model *)
 

@@ -16,9 +16,9 @@
     Group totals are synthesized automatically by [Statement.auto_total] (called implicitly by
     [Statement.eval]) -- no explicit totals needed.
 
-    Demonstrates: [Flow.t] for all line items, [Flow.init] and [Flow.scan],
-    [Flow.scale], [Statement.flow_line], [Statement.group] (auto_total), [Statement.eval],
-    [Statement.pp], [Statement.lines]. *)
+    Demonstrates: [Flow.t] for all line items, [Flow.init] and [Flow.scan], [Flow.scale],
+    [Statement.flow_line], [Statement.group] (auto_total), [Statement.eval], [Statement.pp],
+    [Statement.lines]. *)
 
 open Orcaset2
 
@@ -67,8 +67,7 @@ let non_recurring_revenue =
 
 (* Cost of Revenue *)
 
-let recurring_cost =
-  Flow.named "Recurring Cost" (Flow.scale recurring_cost_pct recurring_revenue)
+let recurring_cost = Flow.named "Recurring Cost" (Flow.scale recurring_cost_pct recurring_revenue)
 
 let non_recurring_cost =
   Flow.named "Non-Recurring Cost" (Flow.scale non_recurring_cost_pct non_recurring_revenue)

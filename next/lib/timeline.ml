@@ -27,11 +27,9 @@ let validate_periods periods =
     let prev_end = Period.end_date periods.(i - 1) in
     let cur_start = Period.start_date periods.(i) in
     if Date.(cur_start < prev_end) then
-      invalid_arg
-        (Printf.sprintf "Timeline.of_periods: period %d overlaps period %d" i (i - 1));
+      invalid_arg (Printf.sprintf "Timeline.of_periods: period %d overlaps period %d" i (i - 1));
     if Date.(cur_start > prev_end) then
-      invalid_arg
-        (Printf.sprintf "Timeline.of_periods: gap between period %d and %d" (i - 1) i)
+      invalid_arg (Printf.sprintf "Timeline.of_periods: gap between period %d and %d" (i - 1) i)
   done
 
 let of_periods periods =

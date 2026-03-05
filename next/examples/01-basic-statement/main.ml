@@ -33,8 +33,7 @@ let tl = Timeline.make ~start_date ~offset:(Period.make_offset ~quarters:1 ()) ~
 
 (* Revenue *)
 
-let software =
-  Flow.growth_simple ~name:"Software" ~start_date ~rate:software_growth software_first
+let software = Flow.growth_simple ~name:"Software" ~start_date ~rate:software_growth software_first
 
 (* Operating Expenses *)
 

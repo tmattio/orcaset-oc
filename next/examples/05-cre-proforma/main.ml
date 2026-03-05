@@ -67,10 +67,7 @@ let tl = Timeline.monthly ~start_date ~n:n_periods
 
 let base_rent_monthly = building_sf *. base_rent_per_sf_year1 /. 12.0
 let parking_monthly = float_of_int parking_spaces *. parking_rate_monthly
-
-let base_rent =
-  Flow.growth_simple ~name:"Base Rent" ~start_date ~rate:rent_growth base_rent_monthly
-
+let base_rent = Flow.growth_simple ~name:"Base Rent" ~start_date ~rate:rent_growth base_rent_monthly
 let parking = Flow.growth_simple ~name:"Parking" ~start_date ~rate:rent_growth parking_monthly
 
 let other_income =
@@ -83,8 +80,7 @@ let property_taxes =
     (-.property_taxes_annual /. 12.0)
 
 let insurance =
-  Flow.growth_simple ~name:"Insurance" ~start_date ~rate:expense_growth
-    (-.insurance_annual /. 12.0)
+  Flow.growth_simple ~name:"Insurance" ~start_date ~rate:expense_growth (-.insurance_annual /. 12.0)
 
 let utilities =
   Flow.growth_simple ~name:"Utilities" ~start_date ~rate:expense_growth (-.utilities_monthly)
@@ -177,8 +173,7 @@ let _debt_balance, (debt_interest, debt_principal) =
   Balance.feedback ~name:"Loan Balance" ~default:loan_amount (fun prev_bal ->
       let interest =
         Flow.named "Interest Expense"
-          (Flow.scale (-.interest_rate)
-             (Flow.mul (Balance.sample prev_bal) year_fracs))
+          (Flow.scale (-.interest_rate) (Flow.mul (Balance.sample prev_bal) year_fracs))
       in
       let principal = Flow.named "Principal" (Flow.sub debt_total_pmt interest) in
       let balance = Balance.roll_forward ~init:loan_amount principal in
