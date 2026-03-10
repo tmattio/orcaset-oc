@@ -16,9 +16,9 @@ let group ?total label items = Group { label; items; total }
 let flow f = Flow f
 let balance b = Balance b
 
-let to_formula : type c. c series -> c Formula.t = function
-  | Flow f -> Flow.unsafe_to_formula f
-  | Balance b -> Balance.unsafe_to_formula b
+let to_packed_formula : type c. c series -> Formula.packed = function
+  | Flow f -> Formula.Pack (Flow.unsafe_to_formula f)
+  | Balance b -> Formula.Pack (Balance.unsafe_to_formula b)
 
 let flow_line label f = Line { label; data = Flow f }
 let balance_line label b = Line { label; data = Balance b }
@@ -77,23 +77,44 @@ let classify_children items =
         match t with `F -> All_flows | `B -> All_balances
       else Mixed
 
-let direct_data_formula = function Line { data; _ } -> Some data | Group { total; _ } -> total
+let direct_data = function Line { data; _ } -> Some data | Group { total; _ } -> total
 
-let rec auto_total : type c. c series item -> c Formula.t item = function
-  | Line { label; data } -> Line { label; data = to_formula data }
+let balance_sum ?name balances =
+  match balances with
+  | [] -> Balance.const ?name 0.0
+  | first :: rest -> (
+      let total = List.fold_left Balance.add first rest in
+      match name with Some label -> Balance.named label total | None -> total)
+
+let rec auto_total : type c. c series item -> c series item = function
+  | Line _ as line -> line
   | Group { label; items; total } ->
+      let items = List.map auto_total items in
       let kind = classify_children items in
-      let converted = List.map auto_total items in
       let total =
         match total with
-        | Some t -> Some (to_formula t)
+        | Some t -> Some t
         | None when kind = Mixed -> None
         | None -> (
-            match List.filter_map direct_data_formula converted with
-            | [] -> None
-            | child_formulas -> Some (Formula.sum ~name:("Total " ^ label) child_formulas))
+            let total_name = "Total " ^ label in
+            match kind with
+            | All_flows -> (
+                match
+                  List.filter_map direct_data items
+                  |> List.filter_map (function Flow f -> Some f | Balance _ -> None)
+                with
+                | [] -> None
+                | flows -> Some (Flow (Flow.sum ~name:total_name flows)))
+            | All_balances -> (
+                match
+                  List.filter_map direct_data items
+                  |> List.filter_map (function Balance b -> Some b | Flow _ -> None)
+                with
+                | [] -> None
+                | balances -> Some (Balance (balance_sum ~name:total_name balances)))
+            | Mixed -> None)
       in
-      Group { label; items = converted; total }
+      Group { label; items; total }
 
 (* Evaluation *)
 
@@ -107,9 +128,19 @@ let rec collect_series item =
 let eval tl item =
   let item = auto_total item in
   let all_series = collect_series item in
-  let results = Formula.eval_many tl all_series in
-  let pairs = List.combine all_series results in
-  map (fun s -> List.assq s pairs) item
+  let formulas = List.map to_packed_formula all_series in
+  let results = Formula.eval_many_packed tl formulas in
+  let by_id = Hashtbl.create (List.length formulas) in
+  List.iter2
+    (fun packed values ->
+      let (Formula.Pack formula) = packed in
+      Hashtbl.replace by_id formula.id values)
+    formulas results;
+  map
+    (fun series ->
+      let (Formula.Pack formula) = to_packed_formula series in
+      Hashtbl.find by_id formula.id)
+    item
 
 (* Pretty-printing *)
 

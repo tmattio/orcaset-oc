@@ -3,65 +3,70 @@
    SPDX-License-Identifier: SSPL-1.0
   ---------------------------------------------------------------------------*)
 
-(** {b Internal} -- Interval quantities.
+(** Interval quantities.
 
-    Wraps {!Formula.t} with a {!Materialized.query_ctx} provenance hint so that
-    {!Materialized.accrue} can use source boundaries instead of pro-rata splitting. Public API is
-    constrained by [orcaset2.mli]. *)
+    A `Flow.t` is a **flow**: a quantity that accrues over a period. Revenue, rent, interest
+    expense, and principal amortization are all flows.
+
+    You materialize a flow against a {!Timeline.t} with {!eval}. You then call
+    {!Materialized.accrue} to ask "how much accrued over this date range?".
+
+    Exact accrual is derived from the flow AST itself. Exact algebra (`add`, `sub`, `scale`, `neg`,
+    `sum`) preserves exact accrual. Cell-local transforms (`map`, `map2`, `mul`, `div`, and related
+    operators) usually fall back to approximate prorating. *)
 
 type 'c t
-(** The type for flows. Pairs a {!Formula.t} with a {!Materialized.query_ctx} describing data
-    provenance. *)
+(** The type for flows tagged with currency or unit ['c]. *)
 
-type split_fn =
-  start_date:Date.t -> end_date:Date.t -> split_date:Date.t -> value:float -> float * float
-(** The type for functions that split a period's value at [split_date]. Returns [(before, after)]
-    where [before +. after = value]. *)
+type prorater = Formula.prorater
+(** Fractional allocator for splitting a full-period value over a sub-range.
 
-val default_split_fn : split_fn
-(** [default_split_fn] distributes proportionally by day count. Returns [(0., 0.)] for zero-day
-    periods. *)
+    Given the full period [[start_date, end_date)] and a sub-range [[sub_start, sub_end)], returns
+    the fraction of the full-period value that belongs to the sub-range. *)
+
+val default_prorater : prorater
+(** [default_prorater] allocates proportionally by calendar-day overlap. *)
 
 exception Cycle_error of { formula_name : string option; period_index : int }
 (** Raised when evaluation detects a same-period dependency cycle. *)
 
 exception
   Convergence_error of { formula_name : string option; period_index : int; iterations : int }
-(** Raised when {!fixpoint} does not converge within [max_iter] iterations. *)
+(** Raised when {!fixpoint} exhausts [max_iter] without converging. *)
 
-(** {1 Constructors}
-
-    Provenance-aware constructors ({!of_events}, {!of_periods}) record their source data so
-    {!Materialized.accrue} can use exact boundaries. All others produce {!Materialized.Q_cell_based}
-    provenance. *)
+(** {1 Constructors} *)
 
 val const : ?name:string -> float -> 'c t
-(** [const v] is a flow that produces [v] at every period. *)
+(** [const v] is a flow that produces [v] in every period. *)
 
 val init : ?name:string -> (Period.t -> float) -> 'c t
-(** [init f] is a flow that produces [f period] at each period. *)
+(** [init f] is a flow that produces [f period] for each period. *)
 
 val init_indexed : ?name:string -> (int -> Period.t -> float) -> 'c t
-(** [init_indexed f] is a flow that produces [f i period] at period [i]. Prefer {!init} unless the
-    zero-based index is genuinely needed. *)
+(** [init_indexed f] is like {!init} but also passes the zero-based period index to [f].
+
+    Prefer {!init} unless you genuinely need the index. *)
 
 val of_array : ?name:string -> float array -> 'c t
-(** [of_array arr] is a flow that produces [arr.(i)] at period [i]. Periods beyond
-    [Array.length arr] produce [0.0].
+(** [of_array arr] is a flow that produces [arr.(i)] at period [i]. Periods beyond the end of the
+    array produce [0.0].
 
     {b Warning.} The array is captured by reference and must not be mutated after the call. *)
 
 val of_events : ?name:string -> (Date.t * float) list -> 'c t
-(** [of_events events] bins [(date, value)] pairs into periods. Multiple events in the same period
-    are summed. Periods with no events produce [0.0]. Records {!Materialized.Q_events} provenance.
+(** [of_events events] bins sparse dated events into the evaluation timeline. Multiple events in the
+    same period are summed.
 
-    Raises [Invalid_argument] if any date falls outside the timeline. *)
+    Materialized accrual stays exact because the original event dates are preserved in the AST.
 
-val of_periods : ?name:string -> ?split_fn:split_fn -> (Period.t * float) list -> 'c t
-(** [of_periods pairs] distributes period-keyed values into the evaluation timeline by overlap
-    proportion. Records {!Materialized.Q_source_periods} provenance.
+    Raises [Invalid_argument] if any event date falls outside the timeline. *)
 
-    [split_fn] defaults to {!default_split_fn}. *)
+val of_periods : ?name:string -> ?prorater:prorater -> (Period.t * float) list -> 'c t
+(** [of_periods pairs] distributes period-keyed source values into the evaluation timeline by
+    overlap. Source periods may be wider or narrower than the target timeline.
+
+    Materialized accrual stays exact because the original source periods are preserved in the AST.
+*)
 
 val growth_simple :
   ?name:string ->
@@ -70,8 +75,7 @@ val growth_simple :
   rate:float ->
   float ->
   'c t
-(** [growth_simple ~start_date ~rate initial] is a flow with simple (linear) growth. [daycount]
-    defaults to {!Daycount.actual_360}. *)
+(** [growth_simple ~start_date ~rate initial] is simple (linear) growth. *)
 
 val growth_compound :
   ?name:string ->
@@ -80,45 +84,44 @@ val growth_compound :
   rate:float ->
   float ->
   'c t
-(** [growth_compound ~start_date ~rate initial] is a flow with compound growth. [daycount] defaults
-    to {!Daycount.actual_360}. *)
+(** [growth_compound ~start_date ~rate initial] is compound growth. *)
 
 val year_frac : ?name:string -> (Date.t -> Date.t -> float) -> 'c t
-(** [year_frac daycount] is a flow that produces the year fraction of each period. *)
+(** [year_frac daycount] produces the year fraction of each evaluation period. *)
 
 (** {1 Naming} *)
 
 val named : string -> 'c t -> 'c t
-(** [named name f] attaches [name] to [f] for diagnostics and {!Deps.pp_dot}. *)
+(** [named name f] attaches [name] to [f] for diagnostics and dependency graphs. *)
 
-(** {1 Algebra (provenance-preserving)}
+(** {1 Exact algebra}
 
-    These compose provenance through {!Materialized.Q_sum}, {!Materialized.Q_scale}, and
-    {!Materialized.Q_neg}, so {!Materialized.accrue} can still use source boundaries. *)
+    These operations preserve exact accrual when their inputs are exact. *)
 
 val add : 'c t -> 'c t -> 'c t
-(** [add a b] is the pointwise sum of [a] and [b]. *)
+(** [add a b] is the pointwise sum of [a] and [b]. Exact range-query capability composes through
+    {!add}. *)
 
 val sub : 'c t -> 'c t -> 'c t
-(** [sub a b] is the pointwise difference [a - b]. *)
+(** [sub a b] is the pointwise difference [a - b]. Exact range-query capability composes through
+    {!sub}. *)
 
 val scale : float -> 'c t -> 'c t
-(** [scale k f] multiplies every value of [f] by [k]. *)
+(** [scale k f] multiplies every period of [f] by [k]. Exact range-query capability composes through
+    {!scale}. *)
 
 val neg : 'c t -> 'c t
-(** [neg f] negates every value of [f]. *)
+(** [neg f] negates every period of [f]. Exact range-query capability composes through {!neg}. *)
 
 val sum : ?name:string -> 'c t list -> 'c t
-(** [sum fs] is the pointwise sum of all flows in [fs]. The empty list produces [0.0] at every
-    period. *)
+(** [sum fs] is the pointwise sum of all flows in [fs]. The empty list produces [0.0]. *)
 
-(** {1 Cell-local (no provenance)}
-
-    These produce {!Materialized.Q_cell_based} provenance because pointwise transforms do not
-    compose with date-range accrual in general. *)
+(** {1 Cell-local combinators} *)
 
 val map : ?name:string -> (float -> float) -> 'c t -> 'c t
-(** [map f flow] applies [f] to each period's value. *)
+(** [map f flow] applies [f] to each period's value.
+
+    This is cell-local: exact accrual usually degrades to approximate prorating. *)
 
 val map2 : ?name:string -> (float -> float -> float) -> 'c t -> 'c t -> 'c t
 (** [map2 f a b] applies [f] to the values of [a] and [b] at each period. *)
@@ -127,8 +130,7 @@ val mul : 'c t -> 'c t -> 'c t
 (** [mul a b] is the pointwise product of [a] and [b]. *)
 
 val div : 'c t -> 'c t -> 'c t
-(** [div a b] is the pointwise quotient [a /. b]. Division by zero produces [infinity] or [nan] per
-    IEEE 754. *)
+(** [div a b] is the pointwise quotient [a /. b]. *)
 
 val abs : 'c t -> 'c t
 (** [abs f] is the pointwise absolute value of [f]. *)
@@ -140,7 +142,7 @@ val max : 'c t -> 'c t -> 'c t
 (** [max a b] is the pointwise maximum of [a] and [b]. *)
 
 val clamp : lo:float -> hi:float -> 'c t -> 'c t
-(** [clamp ~lo ~hi f] clamps each value to \[[lo]; [hi]\]. *)
+(** [clamp ~lo ~hi f] clamps each period's value to [[lo, hi]]. *)
 
 val round : int -> 'c t -> 'c t
 (** [round digits f] rounds each value to [digits] decimal places. *)
@@ -148,128 +150,106 @@ val round : int -> 'c t -> 'c t
 val where : cond:'a t -> then_:'c t -> else_:'c t -> 'c t
 (** [where ~cond ~then_ ~else_] selects [then_] when [cond.(i) <> 0.0] and [else_] otherwise. *)
 
-(** {1 Cross-period and feedback} *)
+(** {1 Cross-period} *)
 
 val prev : ?name:string -> 'c t -> default:float -> 'c t
-(** [prev f ~default] produces [default] at period 0 and [f.(i-1)] at period [i > 0]. Used by
-    {!Balance.at_period_start}. *)
+(** [prev f ~default] produces [default] at period 0 and [f.(i-1)] at later periods. *)
 
 val scan : ?name:string -> init:float -> (acc:float -> x:float -> float) -> 'c t -> 'c t
-(** [scan ~init f flow] is a running accumulation where [acc] is the output of [scan] at the prior
-    period (not the input flow). Used by {!Balance.roll_forward}.
-    - Period 0: [f ~acc:init ~x:flow.(0)]
-    - Period i: [f ~acc:result.(i-1) ~x:flow.(i)] *)
+(** [scan ~init f flow] is a running accumulation of [flow] where [acc] is the previous output of
+    the scan itself. *)
+
+(** {1 Feedback and fixpoint} *)
 
 val feedback : ?name:string -> default:float -> ('c t -> 'c t * 'a) -> 'a
-(** [feedback ~default f] ties a self-referential knot via {!prev}. Breaks same-period cycles by
-    shifting one period.
+(** [feedback ~default f] ties a self-referential knot by passing [f] a flow representing the prior
+    period's value.
 
-    Raises {!Cycle_error} if the definition contains a same-period cycle. *)
+    Use this when a flow depends on its own previous-period output. *)
 
 val fixpoint : ?name:string -> ?tol:float -> ?max_iter:int -> guess:float -> ('c t -> 'c t) -> 'c t
-(** [fixpoint ~guess f] iterates within each period to find [x] such that [f (const x)] converges to
-    [x].
+(** [fixpoint ~guess f] solves a same-period fixed point in each period. *)
 
-    [tol] defaults to [1e-10]. [max_iter] defaults to [100].
-
-    Raises {!Convergence_error} if [max_iter] iterations are exhausted. *)
+(** {1 Conversion} *)
 
 val convert : rate:float -> 'c1 t -> 'c2 t
-(** [convert ~rate f] scales [f] by [rate] and changes the currency tag. *)
+(** [convert ~rate f] scales [f] by [rate] and changes the phantom currency tag. *)
 
 (** {1 Evaluation} *)
 
 module Materialized : sig
-  (** Provenance ADT for exact partial-period accrual. Tracks how the flow was constructed so
-      {!accrue} can use source boundaries instead of pro-rata splitting. Used by
-      {!Balance.Materialized.at} via {!accrue_via_ctx}. *)
-  type query_ctx =
-    | Q_events of (Date.t * float) list  (** Original event dates. *)
-    | Q_source_periods of { pairs : (Period.t * float) list; split_fn : Formula.Query.split_fn }
-        (** Original source periods and their split function. *)
-    | Q_sum of query_ctx list  (** Sum of sub-provenances. *)
-    | Q_scale of float * query_ctx  (** Scaled sub-provenance. *)
-    | Q_neg of query_ctx  (** Negated sub-provenance. *)
-    | Q_cell_based  (** No provenance; accrual falls back to [split_fn]. *)
+  type query_mode =
+    | Exact
+    | Approx
+        (** Whether {!accrue} uses an AST-derived exact accrual rule or falls back to prorating the
+            materialized cells. *)
 
   type 'c t
-  (** The type for materialized flow results. Each value is bound to its period, with provenance
-      attached. *)
+  (** Materialized flow values paired with their evaluation timeline. *)
 
   val make : Timeline.t -> float array -> 'c t
-  (** [make tl values] binds [values] to [tl] with {!Q_cell_based} provenance. *)
+  (** [make tl values] binds [values] to [tl] with approximate query mode.
 
-  val timeline : _ t -> Timeline.t
+      This is a low-level constructor. {!eval} is usually what you want. *)
+
+  val query_mode : 'c t -> query_mode
+  (** [query_mode m] reports whether date-range accrual is exact or approximate. *)
+
+  val timeline : 'c t -> Timeline.t
   (** [timeline m] is the timeline [m] was evaluated against. *)
 
-  val to_array : _ t -> float array
-  (** [to_array m] is a fresh copy of the values. *)
+  val to_array : 'c t -> float array
+  (** [to_array m] copies the materialized values. *)
 
-  val unsafe_values : _ t -> float array
-  (** [unsafe_values m] is the backing array. The caller must not mutate it. *)
+  val unsafe_values : 'c t -> float array
+  (** [unsafe_values m] exposes the backing array. The caller must not mutate it. *)
 
-  val length : _ t -> int
+  val length : 'c t -> int
   (** [length m] is the number of periods. *)
 
-  val get : _ t -> int -> float
+  val get : 'c t -> int -> float
   (** [get m i] is the value at period [i]. *)
 
-  val period : _ t -> int -> Period.t
+  val period : 'c t -> int -> Period.t
   (** [period m i] is the period at index [i]. *)
 
-  val to_list : _ t -> (Period.t * float) list
+  val to_list : 'c t -> (Period.t * float) list
   (** [to_list m] is the [(period, value)] pairs. *)
 
-  val iter : (Period.t -> float -> unit) -> _ t -> unit
-  (** [iter f m] applies [f] to each [(period, value)]. *)
+  val iter : (Period.t -> float -> unit) -> 'c t -> unit
+  (** [iter f m] iterates over [(period, value)] pairs. *)
 
-  val fold : ('a -> Period.t -> float -> 'a) -> 'a -> _ t -> 'a
-  (** [fold f init m] folds over each [(period, value)]. *)
+  val fold : ('a -> Period.t -> float -> 'a) -> 'a -> 'c t -> 'a
+  (** [fold f init m] folds over [(period, value)] pairs. *)
 
-  val accrue : ?split_fn:split_fn -> _ t -> start_date:Date.t -> end_date:Date.t -> float
-  (** [accrue m ~start_date ~end_date] sums the flow over the date range. Uses {!query_ctx}
-      provenance when available, falls back to [split_fn] (default {!default_split_fn}) on
-      {!Q_cell_based}. Returns [0.0] if the date range does not overlap the timeline. *)
+  val accrue : ?prorater:prorater -> 'c t -> start_date:Date.t -> end_date:Date.t -> float
+  (** [accrue m ~start_date ~end_date] sums the flow over [[start_date, end_date)].
 
-  val accrue_via_ctx : query_ctx -> start_date:Date.t -> end_date:Date.t -> float
-  (** [accrue_via_ctx ctx ~start_date ~end_date] is low-level accrual on a bare provenance context.
-
-      Raises [Exit] on {!Q_cell_based} so the caller can fall back to pro-rata. Used by
-      {!Balance.Materialized.at}. *)
-
-  val query : _ t -> query_ctx
-  (** [query m] is [m]'s provenance context. *)
+      When [query_mode m = Exact], Orcaset accrues from exact AST semantics (events,
+      source-period overlap, and exact linear compositions). Otherwise it falls back to prorating
+      materialized period values with [prorater]. *)
 end
 
 val eval : Timeline.t -> 'c t -> 'c Materialized.t
-(** [eval tl f] materializes [f] against [tl].
-
-    Raises {!Cycle_error} or {!Convergence_error}. *)
+(** [eval tl f] materializes [f] against [tl]. *)
 
 val eval_many : Timeline.t -> 'c t list -> 'c Materialized.t list
-(** [eval_many tl fs] materializes each flow in [fs], sharing a single memoization context.
-
-    Raises {!Cycle_error} or {!Convergence_error}. *)
+(** [eval_many tl fs] materializes [fs] sharing one memoization context. *)
 
 val eval_values : Timeline.t -> 'c t -> float array
-(** [eval_values tl f] is like {!eval} but returns the raw array without provenance. Used by
-    {!Statement}. *)
+(** [eval_values tl f] is like {!eval} but returns the raw array only. *)
 
-(** {1 Escape hatches}
+(** {1 Escape hatches} *)
 
-    Used by {!Balance} and {!Statement} for cross-module interop. These bypass the provenance layer.
-*)
+val unsafe_to_formula : 'c t -> (Formula.flow_kind, 'c) Formula.t
+(** Exposes the underlying typed AST node. Internal escape hatch for {!Balance} and {!Statement}. *)
 
-val unsafe_to_formula : 'c t -> 'c Formula.t
-(** [unsafe_to_formula f] is the underlying formula. Provenance is lost. *)
-
-val unsafe_of_formula : 'c Formula.t -> 'c t
-(** [unsafe_of_formula f] wraps [f] with {!Materialized.Q_cell_based} provenance. *)
+val unsafe_of_formula : (Formula.flow_kind, 'c) Formula.t -> 'c t
+(** Wraps a raw flow formula without changing semantics. *)
 
 val unsafe_of_array : ?name:string -> float array -> 'c t
-(** [unsafe_of_array arr] is like {!of_array} but named [unsafe] to signal the
-    {!Materialized.Q_cell_based} provenance. The array is captured by reference and must not be
-    mutated. *)
+(** Alias of {!of_array}; named [unsafe] to signal that you are taking responsibility for the
+    array's lifetime. *)
 
 (** {1 Dependency graph} *)
 
@@ -278,22 +258,29 @@ module Deps : sig
   (** A node in the computation DAG. *)
 
   type edge = Formula.Deps.edge = { src : int; dst : int }
-  (** A directed edge from dependency to consumer. *)
+  (** A directed edge from a dependency to a consumer. *)
 
-  val graph : ?named_only:bool -> _ t list -> node list * edge list
-  (** [graph roots] returns all reachable nodes and edges. When [named_only] is [true] (default
-      [false]), unnamed intermediate nodes are collapsed. *)
+  val graph : ?named_only:bool -> 'c t list -> node list * edge list
+  (** [graph roots] returns all nodes and edges reachable from [roots]. When [named_only] is [true],
+      unnamed intermediate nodes are collapsed. *)
 
-  val pp_dot : ?named_only:bool -> Format.formatter -> _ t list -> unit
+  val pp_dot : ?named_only:bool -> Format.formatter -> 'c t list -> unit
   (** [pp_dot ppf roots] formats a Graphviz DOT representation. *)
 end
 
-(** {1 Infix syntax} *)
-
 module Syntax : sig
   val ( + ) : 'c t -> 'c t -> 'c t
+  (** [a + b] is {!add}[ a b]. *)
+
   val ( - ) : 'c t -> 'c t -> 'c t
+  (** [a - b] is {!sub}[ a b]. *)
+
   val ( * ) : 'c t -> 'c t -> 'c t
+  (** [a * b] is {!mul}[ a b]. *)
+
   val ( / ) : 'c t -> 'c t -> 'c t
+  (** [a / b] is {!div}[ a b]. *)
+
   val ( *$ ) : float -> 'c t -> 'c t
+  (** [k *$ f] is {!scale}[ k f]. *)
 end

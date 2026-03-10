@@ -122,13 +122,13 @@ module Flow : sig
   type 'c t = 'c Flow.t
   (** The type for flows tagged with currency or unit ['c]. *)
 
-  type split_fn = Flow.split_fn
-  (** The type for functions that split a period's value at a date. Given the period's [start_date],
-      [end_date], and a [split_date] within the period, returns [(before, after)] where
-      [before +. after = value]. *)
+  type prorater = Flow.prorater
+  (** The type for functions that allocate a full-period value to a sub-range. Given the full period
+      [[start_date, end_date)] and a sub-range [[sub_start, sub_end)], it returns the fraction of
+      the full-period value that belongs to the sub-range. *)
 
-  val default_split_fn : split_fn
-  (** [default_split_fn] distributes the value proportionally by day count. *)
+  val default_prorater : prorater
+  (** [default_prorater] distributes the value proportionally by day count. *)
 
   (** {1:exceptions Exceptions} *)
 
@@ -164,10 +164,10 @@ module Flow : sig
 
       Raises [Invalid_argument] if any event date falls outside the timeline. *)
 
-  val of_periods : ?name:string -> ?split_fn:split_fn -> (Period.t * float) list -> 'c t
+  val of_periods : ?name:string -> ?prorater:prorater -> (Period.t * float) list -> 'c t
   (** [of_periods pairs] distributes period-keyed values into the evaluation timeline using
       overlap-based splitting. Each source period's value is allocated to evaluation periods
-      proportionally to the overlap, using [split_fn] (default: pro-rata by day count).
+      proportionally to the overlap, using [prorater] (default: pro-rata by day count).
 
       Source periods that partially overlap an evaluation period contribute only the overlapping
       portion. Multiple source periods overlapping the same evaluation period are summed. Evaluation
@@ -286,8 +286,17 @@ module Flow : sig
   (** Materialized results that keep period bindings attached, preventing accidental misalignment
       between values and their periods. *)
   module Materialized : sig
+    type query_mode = Flow.Materialized.query_mode =
+      | Exact
+      | Approx
+          (** Whether {!accrue} is answered from exact AST semantics or by prorating materialized
+              cells. *)
+
     type 'c t = 'c Flow.Materialized.t
     (** The type for materialized flow results. Each value is bound to its period. *)
+
+    val query_mode : _ t -> query_mode
+    (** [query_mode m] reports whether date-range accrual is exact or approximate. *)
 
     val timeline : _ t -> Timeline.t
     (** [timeline m] is the timeline [m] was evaluated against. *)
@@ -313,14 +322,13 @@ module Flow : sig
     val fold : ('a -> Period.t -> float -> 'a) -> 'a -> _ t -> 'a
     (** [fold f init m] folds [f] over each [(period, value)] pair. *)
 
-    val accrue : ?split_fn:split_fn -> _ t -> start_date:Date.t -> end_date:Date.t -> float
-    (** [accrue m ~start_date ~end_date] sums the flow over the date range. When source provenance
-        is available (from {!val:of_events} or {!val:of_periods}), accrual uses the original source
-        boundaries for exact splitting. Provenance composes through {!val:add}, {!val:sub},
-        {!val:scale}, {!val:neg}, and {!val:sum}.
+    val accrue : ?prorater:prorater -> _ t -> start_date:Date.t -> end_date:Date.t -> float
+    (** [accrue m ~start_date ~end_date] sums the flow over the date range.
 
-        When provenance is unavailable (cell-local combinators), falls back to [split_fn] (default:
-        pro-rata by day count). Returns [0.0] if the date range does not overlap the timeline. *)
+        When [query_mode m = Exact], the query is answered from exact AST semantics (events,
+        source-period overlap, and exact linear compositions). Otherwise it falls back to [prorater]
+        (default: pro-rata by day count). Returns [0.0] if the date range does not overlap the
+        timeline. *)
   end
 
   val eval : Timeline.t -> 'c t -> 'c Materialized.t
@@ -416,8 +424,9 @@ module Balance : sig
       - Period 0: [init + flow.(0)]
       - Period i: [result.(i-1) + flow.(i)]
 
-      This is the fundamental flow-to-balance bridge. The companion flow is stored intrinsically and
-      used by {!Materialized.at} for provenance-aware interpolation. *)
+      This is the fundamental flow-to-balance bridge. The roll-forward semantics are stored
+      intrinsically in the private typed AST and used by {!Materialized.at} for exact point queries.
+  *)
 
   (** {1:naming Naming} *)
 
@@ -522,8 +531,17 @@ module Balance : sig
   (** Materialized results that keep period bindings attached, preventing accidental misalignment
       between values and their periods. *)
   module Materialized : sig
+    type query_mode = Balance.Materialized.query_mode =
+      | Exact
+      | Approx
+          (** Whether {!at} is answered from exact AST semantics or by falling back to the enclosing
+              period's materialized value. *)
+
     type 'c t = 'c Balance.Materialized.t
     (** The type for materialized balance results. Each value is bound to its period. *)
+
+    val query_mode : _ t -> query_mode
+    (** [query_mode m] reports whether point queries are exact or approximate. *)
 
     val timeline : _ t -> Timeline.t
     (** [timeline m] is the timeline [m] was evaluated against. *)
@@ -549,14 +567,12 @@ module Balance : sig
     val fold : ('a -> Period.t -> float -> 'a) -> 'a -> _ t -> 'a
     (** [fold f init m] folds [f] over each [(period, value)] pair. *)
 
-    val at : ?split_fn:Flow.split_fn -> _ t -> Date.t -> float
-    (** [at m date] is the interpolated balance at [date].
+    val at : ?prorater:Flow.prorater -> _ t -> Date.t -> float
+    (** [at m date] is the balance at [date].
 
-        When provenance is available (from {!val:roll_forward}, {!val:of_dates}, or composed via
-        {!val:add}, {!val:sub}, etc.), computes the exact value using intrinsic semantics.
-
-        When provenance is unavailable (cell-local combinators), falls back to the current period's
-        end-of-period value.
+        When [query_mode m = Exact], the answer is derived from intrinsic AST semantics (for example
+        {!val:roll_forward}, {!val:of_dates}, and exact pointwise combinations). Otherwise it falls
+        back to the current period's end-of-period value.
 
         Raises [Invalid_argument] if [date] is outside the timeline. *)
   end
@@ -579,8 +595,7 @@ module Balance : sig
 
   val eval : Timeline.t -> 'c t -> 'c Materialized.t
   (** [eval tl b] materializes [b] against [tl], returning a {!Materialized.t} with period bindings
-      attached. When the balance was created with {!roll_forward}, the companion flow is
-      co-evaluated for provenance-aware {!Materialized.at}. *)
+      attached. Exact point-query capability is derived from the balance AST itself. *)
 end
 
 module Statement : module type of Statement
