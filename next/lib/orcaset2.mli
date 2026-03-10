@@ -38,7 +38,8 @@
 
     {1 Modules}
 
-    {!modules:Date Period Daycount Calendar Timeline Schedule Key Scope Flow Balance Statement} *)
+    {!modules:Date Period Daycount Calendar Timeline Schedule Key Scope Prorater Flow Balance
+    Statement} *)
 
 module Date : module type of Date
 (** Gregorian calendar dates. *)
@@ -101,6 +102,9 @@ end
 module Scope : module type of Scope
 (** Typed heterogeneous model registries. *)
 
+module Prorater : module type of Prorater
+(** Allocate a full-period value to a sub-range. *)
+
 module Flow : sig
   (** Interval quantities (flows).
 
@@ -121,14 +125,6 @@ module Flow : sig
 
   type 'c t = 'c Flow.t
   (** The type for flows tagged with currency or unit ['c]. *)
-
-  type prorater = Flow.prorater
-  (** The type for functions that allocate a full-period value to a sub-range. Given the full period
-      [[start_date, end_date)] and a sub-range [[sub_start, sub_end)], it returns the fraction of
-      the full-period value that belongs to the sub-range. *)
-
-  val default_prorater : prorater
-  (** [default_prorater] distributes the value proportionally by day count. *)
 
   (** {1:exceptions Exceptions} *)
 
@@ -164,7 +160,7 @@ module Flow : sig
 
       Raises [Invalid_argument] if any event date falls outside the timeline. *)
 
-  val of_periods : ?name:string -> ?prorater:prorater -> (Period.t * float) list -> 'c t
+  val of_periods : ?name:string -> ?prorater:Prorater.t -> (Period.t * float) list -> 'c t
   (** [of_periods pairs] distributes period-keyed values into the evaluation timeline using
       overlap-based splitting. Each source period's value is allocated to evaluation periods
       proportionally to the overlap, using [prorater] (default: pro-rata by day count).
@@ -322,7 +318,7 @@ module Flow : sig
     val fold : ('a -> Period.t -> float -> 'a) -> 'a -> _ t -> 'a
     (** [fold f init m] folds [f] over each [(period, value)] pair. *)
 
-    val accrue : ?prorater:prorater -> _ t -> start_date:Date.t -> end_date:Date.t -> float
+    val accrue : ?prorater:Prorater.t -> _ t -> start_date:Date.t -> end_date:Date.t -> float
     (** [accrue m ~start_date ~end_date] sums the flow over the date range.
 
         When [query_mode m = Exact], the query is answered from exact AST semantics (events,
@@ -567,7 +563,7 @@ module Balance : sig
     val fold : ('a -> Period.t -> float -> 'a) -> 'a -> _ t -> 'a
     (** [fold f init m] folds [f] over each [(period, value)] pair. *)
 
-    val at : ?prorater:Flow.prorater -> _ t -> Date.t -> float
+    val at : ?prorater:Prorater.t -> _ t -> Date.t -> float
     (** [at m date] is the balance at [date].
 
         When [query_mode m = Exact], the answer is derived from intrinsic AST semantics (for example

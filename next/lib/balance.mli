@@ -18,10 +18,6 @@
 type 'c t
 (** The type for balances tagged with currency or unit ['c]. *)
 
-type prorater = Flow.prorater
-(** Fractional allocator used when interpolation falls back to prorating the current period's flow.
-*)
-
 (** {1 Constructors} *)
 
 val const : ?name:string -> float -> 'c t
@@ -199,7 +195,7 @@ module Materialized : sig
   val fold : ('a -> Period.t -> float -> 'a) -> 'a -> 'c t -> 'a
   (** [fold f init m] folds over [(period, value)] pairs. *)
 
-  val at : ?prorater:prorater -> 'c t -> Date.t -> float
+  val at : ?prorater:Prorater.t -> 'c t -> Date.t -> float
   (** [at m date] interpolates the balance at [date].
 
       When [query_mode m = Exact], Orcaset interpolates from intrinsic AST semantics (for example

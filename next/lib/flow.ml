@@ -4,9 +4,6 @@
   ---------------------------------------------------------------------------*)
 
 type 'c t = (Formula.flow_kind, 'c) Formula.t
-type prorater = Formula.prorater
-
-let default_prorater = Formula.default_prorater
 
 exception Cycle_error = Formula.Cycle_error
 exception Convergence_error = Formula.Convergence_error

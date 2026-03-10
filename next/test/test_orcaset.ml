@@ -210,6 +210,31 @@ let test_daycount () =
   let yf = Daycount.calendar_monthly (date 2025 1 1) (date 2025 7 1) in
   fl "cm neg" (-.yf) (Daycount.calendar_monthly (date 2025 7 1) (date 2025 1 1))
 
+(* Prorater *)
+
+let test_prorater () =
+  let start_date = date 2025 1 1 in
+  let end_date = date 2025 4 1 in
+  fl "actual_days half"
+    (31.0 /. float_of_int (Date.diff end_date start_date))
+    (Prorater.actual_days ~start_date ~end_date ~sub_start:(date 2025 2 1) ~sub_end:(date 2025 3 4));
+  fl "actual_days clamp"
+    (31.0 /. float_of_int (Date.diff end_date start_date))
+    (Prorater.actual_days ~start_date ~end_date ~sub_start:(date 2024 12 1) ~sub_end:(date 2025 2 1));
+  fl "30/360 half" 0.5
+    (Prorater.thirty_360_us ~start_date ~end_date ~sub_start:(date 2025 1 1)
+       ~sub_end:(date 2025 2 16));
+  fl "30/360 zero" 0.0
+    (Prorater.thirty_360_us ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 1)
+       ~sub_start:(date 2025 1 1) ~sub_end:(date 2025 1 1));
+  let weekdays = Prorater.business_days Calendar.weekdays in
+  fl "business days weekdays" (5.0 /. 10.0)
+    (weekdays ~start_date:(date 2025 1 6) ~end_date:(date 2025 1 20) ~sub_start:(date 2025 1 13)
+       ~sub_end:(date 2025 1 20));
+  fl "business days zero" 0.0
+    (weekdays ~start_date:(date 2025 1 11) ~end_date:(date 2025 1 13) ~sub_start:(date 2025 1 11)
+       ~sub_end:(date 2025 1 12))
+
 (* Flow: constructors *)
 
 let test_flow_constructors () =
@@ -1121,6 +1146,7 @@ let () =
       ("Period", [ test_case "period" `Quick test_period ]);
       ("Timeline", [ test_case "timeline" `Quick test_timeline ]);
       ("Daycount", [ test_case "daycount" `Quick test_daycount ]);
+      ("Prorater", [ test_case "prorater" `Quick test_prorater ]);
       ("Calendar", [ test_case "calendar" `Quick test_calendar ]);
       ("Schedule", [ test_case "schedule" `Quick test_schedule ]);
       ( "Flow combinators",

@@ -4,7 +4,6 @@
   ---------------------------------------------------------------------------*)
 
 type 'c t = (Formula.balance_kind, 'c) Formula.t
-type prorater = Flow.prorater
 
 (* Constructors *)
 

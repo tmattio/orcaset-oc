@@ -19,7 +19,7 @@ type balance_kind
 
 type _ kind = Flow_k : flow_kind kind | Balance_k : balance_kind kind
 
-type prorater = start_date:Date.t -> end_date:Date.t -> sub_start:Date.t -> sub_end:Date.t -> float
+type prorater = Prorater.t
 (** A prorater allocates a full-period value to a sub-range of that period.
 
     It returns the fraction of the value that belongs to [[sub_start, sub_end)].
@@ -28,7 +28,7 @@ type prorater = start_date:Date.t -> end_date:Date.t -> sub_start:Date.t -> sub_
     The intended law is additivity over partitions of the full period. *)
 
 val default_prorater : prorater
-(** Day-count prorater based on actual calendar days. Zero-length periods map to [0.0]. *)
+(** Default prorater. Uses {!Prorater.actual_days}. *)
 
 type ('k, 'c) t = private { id : int; name : string option; kind : 'k kind; node : ('k, 'c) node }
 and any_flow = Any_flow : (flow_kind, 'c) t -> any_flow

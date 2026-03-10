@@ -16,16 +16,9 @@
 type flow_kind
 type balance_kind
 type _ kind = Flow_k : flow_kind kind | Balance_k : balance_kind kind
-type prorater = start_date:Date.t -> end_date:Date.t -> sub_start:Date.t -> sub_end:Date.t -> float
+type prorater = Prorater.t
 
-let default_prorater ~start_date ~end_date ~sub_start ~sub_end =
-  let total_days = Int.max 0 (Date.diff end_date start_date) in
-  if total_days = 0 then 0.0
-  else
-    let sub_start = Date.max start_date sub_start in
-    let sub_end = Date.min end_date sub_end in
-    let sub_days = Int.max 0 (Date.diff sub_end sub_start) in
-    float_of_int sub_days /. float_of_int total_days
+let default_prorater = Prorater.actual_days
 
 let next_id =
   let counter = Atomic.make 0 in

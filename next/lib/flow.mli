@@ -18,15 +18,6 @@
 type 'c t
 (** The type for flows tagged with currency or unit ['c]. *)
 
-type prorater = Formula.prorater
-(** Fractional allocator for splitting a full-period value over a sub-range.
-
-    Given the full period [[start_date, end_date)] and a sub-range [[sub_start, sub_end)], returns
-    the fraction of the full-period value that belongs to the sub-range. *)
-
-val default_prorater : prorater
-(** [default_prorater] allocates proportionally by calendar-day overlap. *)
-
 exception Cycle_error of { formula_name : string option; period_index : int }
 (** Raised when evaluation detects a same-period dependency cycle. *)
 
@@ -61,7 +52,7 @@ val of_events : ?name:string -> (Date.t * float) list -> 'c t
 
     Raises [Invalid_argument] if any event date falls outside the timeline. *)
 
-val of_periods : ?name:string -> ?prorater:prorater -> (Period.t * float) list -> 'c t
+val of_periods : ?name:string -> ?prorater:Prorater.t -> (Period.t * float) list -> 'c t
 (** [of_periods pairs] distributes period-keyed source values into the evaluation timeline by
     overlap. Source periods may be wider or narrower than the target timeline.
 
@@ -222,7 +213,7 @@ module Materialized : sig
   val fold : ('a -> Period.t -> float -> 'a) -> 'a -> 'c t -> 'a
   (** [fold f init m] folds over [(period, value)] pairs. *)
 
-  val accrue : ?prorater:prorater -> 'c t -> start_date:Date.t -> end_date:Date.t -> float
+  val accrue : ?prorater:Prorater.t -> 'c t -> start_date:Date.t -> end_date:Date.t -> float
   (** [accrue m ~start_date ~end_date] sums the flow over [[start_date, end_date)].
 
       When [query_mode m = Exact], Orcaset accrues from exact AST semantics (events,
