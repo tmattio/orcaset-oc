@@ -15,7 +15,13 @@
 
 type flow_kind
 type balance_kind
-type _ kind = Flow_k : flow_kind kind | Balance_k : balance_kind kind
+type pointwise_kind
+
+type _ kind =
+  | Flow_k : flow_kind kind
+  | Balance_k : balance_kind kind
+  | Pointwise_k : pointwise_kind kind
+
 type prorater = Prorater.t
 
 let default_prorater = Prorater.actual_days
@@ -25,7 +31,7 @@ let next_id =
   fun () -> Atomic.fetch_and_add counter 1
 
 type ('k, 'c) t = { id : int; name : string option; kind : 'k kind; node : ('k, 'c) node }
-and any_flow = Any_flow : (flow_kind, 'c) t -> any_flow
+and any_series = Any_series : ('k, 'c) t -> any_series
 and ('k, 'c) delay = { mutable resolved : ('k, 'c) t option; thunk : unit -> ('k, 'c) t }
 
 and ('k, 'c) node =
@@ -63,12 +69,15 @@ and ('k, 'c) node =
   | Map of (float -> float) * ('k, 'c) t
   | Map2 of (float -> float -> float) * ('k, 'c) t * ('k, 'c) t
   | Sum of ('k, 'c) t list
-  | Where of { cond : any_flow; then_ : ('k, 'c) t; else_ : ('k, 'c) t }
+  | Where of { cond : any_series; then_ : ('k, 'c) t; else_ : ('k, 'c) t }
   | Prev of { src : ('k, 'c) t; default : float }
   | Scan_flow of { init : float; f : acc:float -> x:float -> float; flow : (flow_kind, 'c) t }
   | Accumulate of { init : float; f : acc:float -> x:float -> float; flow : (flow_kind, 'c) t }
   | Roll_forward of { init : float; flow : (flow_kind, 'c) t }
-  | Sample of (balance_kind, 'c) t
+  | Pointwise_of_flow of (flow_kind, 'c) t
+  | Pointwise_of_balance of (balance_kind, 'c) t
+  | Flow_of_pointwise of (pointwise_kind, 'c) t
+  | Change_balance of { balance : (balance_kind, 'c) t; default : float }
   | Delay of ('k, 'c) delay
   | Var of float ref
   | Fixpoint of { var : ('k, 'c) t; body : ('k, 'c) t; tol : float; max_iter : int; guess : float }
@@ -141,7 +150,7 @@ let sum ?name kind ss =
   | [ s ] -> ( match name with Some n -> named n s | None -> s)
   | _ -> mk ?name kind (Sum ss)
 
-let where ~cond ~then_ ~else_ = mk then_.kind (Where { cond = Any_flow cond; then_; else_ })
+let where ~cond ~then_ ~else_ = mk then_.kind (Where { cond = Any_series cond; then_; else_ })
 
 (* Cross-period / bridges *)
 
@@ -149,7 +158,10 @@ let prev ?name src ~default = mk ?name src.kind (Prev { src; default })
 let scan ?name ~init f flow = mk ?name Flow_k (Scan_flow { init; f; flow })
 let accumulate ?name ~init f flow = mk ?name Balance_k (Accumulate { init; f; flow })
 let roll_forward ?name ~init flow = mk ?name Balance_k (Roll_forward { init; flow })
-let sample ?name balance = mk ?name Flow_k (Sample balance)
+let pointwise_of_flow ?name flow = mk ?name Pointwise_k (Pointwise_of_flow flow)
+let pointwise_of_balance ?name balance = mk ?name Pointwise_k (Pointwise_of_balance balance)
+let flow_of_pointwise ?name pointwise = mk ?name Flow_k (Flow_of_pointwise pointwise)
+let change_balance ?name balance ~default = mk ?name Flow_k (Change_balance { balance; default })
 let convert ~rate s = (Obj.magic (scale rate s) : (_, _) t)
 
 (* Feedback / fixpoint *)
@@ -274,11 +286,14 @@ let rec invalidate_period : type k c. eval_ctx -> (k, c) t -> int -> unit =
             invalidate_period ctx a i;
             invalidate_period ctx b i
         | Sum ss -> List.iter (fun src -> invalidate_period ctx src i) ss
-        | Where { cond = Any_flow cond; then_; else_ } ->
+        | Where { cond = Any_series cond; then_; else_ } ->
             invalidate_period ctx cond i;
             invalidate_period ctx then_ i;
             invalidate_period ctx else_ i
-        | Sample src -> invalidate_period ctx src i
+        | Pointwise_of_flow src -> invalidate_period ctx src i
+        | Pointwise_of_balance src -> invalidate_period ctx src i
+        | Flow_of_pointwise src -> invalidate_period ctx src i
+        | Change_balance { balance; _ } -> invalidate_period ctx balance i
         | Prev _ | Scan_flow _ | Accumulate _ | Roll_forward _ | Fixpoint _ | Delay _ -> ()
       end
 
@@ -333,7 +348,7 @@ and compute : type k c. eval_ctx -> (k, c) t -> int -> float =
   | Map (f, src) -> f (eval_cell ctx src i)
   | Map2 (f, a, b) -> f (eval_cell ctx a i) (eval_cell ctx b i)
   | Sum ss -> List.fold_left (fun acc src -> acc +. eval_cell ctx src i) 0.0 ss
-  | Where { cond = Any_flow cond; then_; else_ } ->
+  | Where { cond = Any_series cond; then_; else_ } ->
       if eval_cell ctx cond i <> 0.0 then eval_cell ctx then_ i else eval_cell ctx else_ i
   | Prev { src; default } -> if i = 0 then default else eval_cell ctx src (i - 1)
   | Scan_flow { init; f; flow } ->
@@ -347,7 +362,12 @@ and compute : type k c. eval_ctx -> (k, c) t -> int -> float =
   | Roll_forward { init; flow } ->
       let acc = if i = 0 then init else eval_cell ctx s (i - 1) in
       acc +. eval_cell ctx flow i
-  | Sample balance -> eval_cell ctx balance i
+  | Pointwise_of_flow flow -> eval_cell ctx flow i
+  | Pointwise_of_balance balance -> eval_cell ctx balance i
+  | Flow_of_pointwise pointwise -> eval_cell ctx pointwise i
+  | Change_balance { balance; default } ->
+      let prev = if i = 0 then default else eval_cell ctx balance (i - 1) in
+      eval_cell ctx balance i -. prev
   | Var r -> !r
   | Fixpoint { var; body; tol; max_iter; guess } ->
       let r = match var.node with Var r -> r | _ -> assert false in
@@ -468,6 +488,15 @@ end
    public Flow / Balance materialized values fall back to [Query] or to the
    enclosing period's cell value when exact querying is unavailable. *)
 
+type query_mode = Exact | Approx
+
+type flow_query = {
+  mode : query_mode;
+  accrue : prorater:prorater -> start_date:Date.t -> end_date:Date.t -> float;
+}
+
+type balance_query = { mode : query_mode; at : prorater:prorater -> Date.t -> float }
+
 let accrue_events events ~start_date ~end_date =
   List.fold_left
     (fun acc (d, v) ->
@@ -499,9 +528,9 @@ let obs_at sorted_obs before_first date =
   in
   search 0 (n - 1) before_first
 
-let exact_accrual : type c.
-    Timeline.t -> (flow_kind, c) t -> (start_date:Date.t -> end_date:Date.t -> float) option =
- fun _tl s ->
+let exact_flow_accrual : type c.
+    (flow_kind, c) t -> (start_date:Date.t -> end_date:Date.t -> float) option =
+ fun s ->
   let visiting = Hashtbl.create 32 in
   let rec build : type c. (flow_kind, c) t -> (start_date:Date.t -> end_date:Date.t -> float) option
       =
@@ -544,8 +573,9 @@ let exact_accrual : type c.
                 (fun ~start_date ~end_date ->
                   List.fold_left (fun acc f -> acc +. f ~start_date ~end_date) 0.0 fs)
         | Map _ | Map2 _ | Of_array _ | Init _ | Growth_simple _ | Growth_compound _ | Year_frac _
-        | Where _ | Prev _ | Scan_flow _ | Accumulate _ | Roll_forward _ | Sample _ | Var _
-        | Fixpoint _ | Const _ | Observations _ ->
+        | Where _ | Prev _ | Scan_flow _ | Accumulate _ | Roll_forward _ | Pointwise_of_flow _
+        | Pointwise_of_balance _ | Flow_of_pointwise _ | Change_balance _ | Var _ | Fixpoint _
+        | Const _ | Observations _ ->
             None
         | Delay _ -> assert false
       in
@@ -555,104 +585,157 @@ let exact_accrual : type c.
   in
   build s
 
-let exact_at tl s =
+let approx_flow_query tl values =
+  {
+    mode = Approx;
+    accrue =
+      (fun ~prorater ~start_date ~end_date ->
+        Query.accrue ~prorater tl values ~start_date ~end_date);
+  }
+
+let flow_query _tl values s =
+  match exact_flow_accrual s with
+  | Some accrue ->
+      {
+        mode = Exact;
+        accrue = (fun ~prorater:_ ~start_date ~end_date -> accrue ~start_date ~end_date);
+      }
+  | None -> approx_flow_query _tl values
+
+let approx_balance_query tl values =
   let outside date =
     invalid_arg
-      (Printf.sprintf "Formula.exact_at: date %s is outside the timeline" (Date.to_string date))
+      (Printf.sprintf "Formula.balance_query: date %s is outside the timeline" (Date.to_string date))
+  in
+  {
+    mode = Approx;
+    at =
+      (fun ~prorater:_ date ->
+        match Timeline.find_index tl date with None -> outside date | Some i -> values.(i));
+  }
+
+let balance_query tl values s =
+  let outside date =
+    invalid_arg
+      (Printf.sprintf "Formula.balance_query: date %s is outside the timeline" (Date.to_string date))
   in
   let visiting = Hashtbl.create 32 in
-  let rec build : type c. (balance_kind, c) t -> (prorater:prorater -> Date.t -> float) option =
+  let rec build : type c. (balance_kind, c) t -> balance_query =
    fun s ->
-    if Hashtbl.mem visiting s.id then None
+    if Hashtbl.mem visiting s.id then approx_balance_query tl values
     else begin
       Hashtbl.replace visiting s.id ();
       let result =
         match resolve s with
-        | Const v -> Some (fun ~prorater:_ _date -> v)
+        | Const v -> { mode = Exact; at = (fun ~prorater:_ _date -> v) }
         | Observations { sorted_obs; before_first; _ } ->
-            Some (fun ~prorater:_ date -> obs_at sorted_obs before_first date)
-        | Add (a, b) -> (
-            match (build a, build b) with
-            | Some fa, Some fb ->
-                Some (fun ~prorater date -> fa ~prorater date +. fb ~prorater date)
-            | _ -> None)
-        | Sub (a, b) -> (
-            match (build a, build b) with
-            | Some fa, Some fb ->
-                Some (fun ~prorater date -> fa ~prorater date -. fb ~prorater date)
-            | _ -> None)
-        | Scale (k, src) -> Option.map (fun f ~prorater date -> k *. f ~prorater date) (build src)
-        | Neg src -> Option.map (fun f ~prorater date -> -.f ~prorater date) (build src)
+            { mode = Exact; at = (fun ~prorater:_ date -> obs_at sorted_obs before_first date) }
+        | Add (a, b) ->
+            let qa = build a in
+            let qb = build b in
+            if qa.mode = Exact && qb.mode = Exact then
+              {
+                mode = Exact;
+                at = (fun ~prorater date -> qa.at ~prorater date +. qb.at ~prorater date);
+              }
+            else approx_balance_query tl values
+        | Sub (a, b) ->
+            let qa = build a in
+            let qb = build b in
+            if qa.mode = Exact && qb.mode = Exact then
+              {
+                mode = Exact;
+                at = (fun ~prorater date -> qa.at ~prorater date -. qb.at ~prorater date);
+              }
+            else approx_balance_query tl values
+        | Scale (k, src) ->
+            let q = build src in
+            if q.mode = Exact then
+              { mode = Exact; at = (fun ~prorater date -> k *. q.at ~prorater date) }
+            else approx_balance_query tl values
+        | Neg src ->
+            let q = build src in
+            if q.mode = Exact then
+              { mode = Exact; at = (fun ~prorater date -> -.q.at ~prorater date) }
+            else approx_balance_query tl values
         | Map (f, src) ->
-            Option.map (fun at_src ~prorater date -> f (at_src ~prorater date)) (build src)
-        | Map2 (f, a, b) -> (
-            match (build a, build b) with
-            | Some at_a, Some at_b ->
-                Some (fun ~prorater date -> f (at_a ~prorater date) (at_b ~prorater date))
-            | _ -> None)
+            let q = build src in
+            if q.mode = Exact then
+              { mode = Exact; at = (fun ~prorater date -> f (q.at ~prorater date)) }
+            else approx_balance_query tl values
+        | Map2 (f, a, b) ->
+            let qa = build a in
+            let qb = build b in
+            if qa.mode = Exact && qb.mode = Exact then
+              {
+                mode = Exact;
+                at = (fun ~prorater date -> f (qa.at ~prorater date) (qb.at ~prorater date));
+              }
+            else approx_balance_query tl values
         | Sum ss ->
-            let ats = List.map build ss in
-            if List.exists Option.is_none ats then None
-            else
-              let fs = List.map Option.get ats in
-              Some
-                (fun ~prorater date -> List.fold_left (fun acc f -> acc +. f ~prorater date) 0.0 fs)
-        | Where { cond = Any_flow cond; then_; else_ } -> (
-            match (build then_, build else_) with
-            | Some at_then, Some at_else ->
-                let cond_values = lazy (eval tl cond) in
-                Some
+            let qs = List.map build ss in
+            if List.for_all (fun q -> q.mode = Exact) qs then
+              {
+                mode = Exact;
+                at =
+                  (fun ~prorater date ->
+                    List.fold_left (fun acc q -> acc +. q.at ~prorater date) 0.0 qs);
+              }
+            else approx_balance_query tl values
+        | Where _ -> approx_balance_query tl values
+        | Prev { src; default } ->
+            let q = build src in
+            if q.mode = Exact then
+              {
+                mode = Exact;
+                at =
                   (fun ~prorater date ->
                     match Timeline.find_index tl date with
                     | None -> outside date
                     | Some i ->
-                        let cond_values = Lazy.force cond_values in
-                        if cond_values.(i) <> 0.0 then at_then ~prorater date
-                        else at_else ~prorater date)
-            | _ -> None)
-        | Prev { src; default } ->
-            Option.map
-              (fun at_src ~prorater date ->
-                match Timeline.find_index tl date with
-                | None -> outside date
-                | Some i ->
-                    if i = 0 then default
-                    else
-                      let d = Timeline.period_end tl (i - 1) in
-                      at_src ~prorater d)
-              (build src)
+                        if i = 0 then default
+                        else
+                          let d = Timeline.period_end tl (i - 1) in
+                          q.at ~prorater d);
+              }
+            else approx_balance_query tl values
         | Roll_forward { init; flow } ->
             let self_values = lazy (eval tl s) in
             let flow_values = lazy (eval tl flow) in
-            let exact_flow = exact_accrual tl flow in
-            Some
-              (fun ~prorater date ->
-                match Timeline.find_index tl date with
-                | None -> outside date
-                | Some i ->
-                    let prev_bal = if i = 0 then init else (Lazy.force self_values).(i - 1) in
-                    let p = Timeline.get tl i in
-                    let flow_to_date =
-                      match exact_flow with
-                      | Some accrue -> accrue ~start_date:(Period.start_date p) ~end_date:date
-                      | None -> Query.before_date ~prorater tl (Lazy.force flow_values) date
-                    in
-                    prev_bal +. flow_to_date)
+            let flow_query = flow_query tl (Lazy.force flow_values) flow in
+            {
+              mode = flow_query.mode;
+              at =
+                (fun ~prorater date ->
+                  match Timeline.find_index tl date with
+                  | None -> outside date
+                  | Some i ->
+                      let prev_bal = if i = 0 then init else (Lazy.force self_values).(i - 1) in
+                      let p = Timeline.get tl i in
+                      let flow_to_date =
+                        flow_query.accrue ~prorater ~start_date:(Period.start_date p) ~end_date:date
+                      in
+                      prev_bal +. flow_to_date);
+            }
         | Delay _ -> assert false
         | Of_array _ | Init _ | Growth_simple _ | Growth_compound _ | Year_frac _ | Events _
-        | Source_periods _ | Scan_flow _ | Accumulate _ | Sample _ | Var _ | Fixpoint _ ->
-            None
+        | Source_periods _ | Scan_flow _ | Accumulate _ | Pointwise_of_flow _
+        | Pointwise_of_balance _ | Flow_of_pointwise _ | Change_balance _ | Var _ | Fixpoint _ ->
+            approx_balance_query tl values
       in
       Hashtbl.remove visiting s.id;
       result
     end
   in
-  match build s with
-  | None -> None
-  | Some f ->
-      Some
-        (fun ~prorater date ->
-          match Timeline.find_index tl date with None -> outside date | Some _ -> f ~prorater date)
+  let query = build s in
+  {
+    query with
+    at =
+      (fun ~prorater date ->
+        match Timeline.find_index tl date with
+        | None -> outside date
+        | Some _ -> query.at ~prorater date);
+  }
 
 type ('k, 'c) ast_node = ('k, 'c) node
 
@@ -685,7 +768,10 @@ module Deps = struct
     | Scan_flow _ -> "scan"
     | Accumulate _ -> "accumulate"
     | Roll_forward _ -> "roll_forward"
-    | Sample _ -> "sample"
+    | Pointwise_of_flow _ -> "pointwise_of_flow"
+    | Pointwise_of_balance _ -> "pointwise_of_balance"
+    | Flow_of_pointwise _ -> "flow_of_pointwise"
+    | Change_balance _ -> "change_balance"
     | Delay _ -> "delay"
     | Var _ -> "var"
     | Fixpoint _ -> "fixpoint"
@@ -698,12 +784,15 @@ module Deps = struct
     | Scale (_, src) | Neg src | Map (_, src) -> [ Pack src ]
     | Map2 (_, a, b) -> [ Pack a; Pack b ]
     | Sum ss -> List.map (fun s -> Pack s) ss
-    | Where { cond = Any_flow cond; then_; else_ } -> [ Pack cond; Pack then_; Pack else_ ]
+    | Where { cond = Any_series cond; then_; else_ } -> [ Pack cond; Pack then_; Pack else_ ]
     | Prev { src; _ } -> [ Pack src ]
     | Scan_flow { flow; _ } -> [ Pack flow ]
     | Accumulate { flow; _ } -> [ Pack flow ]
     | Roll_forward { flow; _ } -> [ Pack flow ]
-    | Sample src -> [ Pack src ]
+    | Pointwise_of_flow src -> [ Pack src ]
+    | Pointwise_of_balance src -> [ Pack src ]
+    | Flow_of_pointwise src -> [ Pack src ]
+    | Change_balance { balance; _ } -> [ Pack balance ]
     | Delay _ -> []
     | Fixpoint { body; _ } -> [ Pack body ]
 

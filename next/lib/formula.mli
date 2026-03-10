@@ -17,7 +17,13 @@ type flow_kind
 type balance_kind
 (** Semantic kind for point-in-time quantities. *)
 
-type _ kind = Flow_k : flow_kind kind | Balance_k : balance_kind kind
+type pointwise_kind
+(** Semantic kind for per-cell values without interval or point-in-time query semantics. *)
+
+type _ kind =
+  | Flow_k : flow_kind kind
+  | Balance_k : balance_kind kind
+  | Pointwise_k : pointwise_kind kind
 
 type prorater = Prorater.t
 (** A prorater allocates a full-period value to a sub-range of that period.
@@ -31,7 +37,7 @@ val default_prorater : prorater
 (** Default prorater. Uses {!Prorater.actual_days}. *)
 
 type ('k, 'c) t = private { id : int; name : string option; kind : 'k kind; node : ('k, 'c) node }
-and any_flow = Any_flow : (flow_kind, 'c) t -> any_flow
+and any_series = Any_series : ('k, 'c) t -> any_series
 and ('k, 'c) delay = private { mutable resolved : ('k, 'c) t option; thunk : unit -> ('k, 'c) t }
 
 and ('k, 'c) node =
@@ -69,12 +75,15 @@ and ('k, 'c) node =
   | Map of (float -> float) * ('k, 'c) t
   | Map2 of (float -> float -> float) * ('k, 'c) t * ('k, 'c) t
   | Sum of ('k, 'c) t list
-  | Where of { cond : any_flow; then_ : ('k, 'c) t; else_ : ('k, 'c) t }
+  | Where of { cond : any_series; then_ : ('k, 'c) t; else_ : ('k, 'c) t }
   | Prev of { src : ('k, 'c) t; default : float }
   | Scan_flow of { init : float; f : acc:float -> x:float -> float; flow : (flow_kind, 'c) t }
   | Accumulate of { init : float; f : acc:float -> x:float -> float; flow : (flow_kind, 'c) t }
   | Roll_forward of { init : float; flow : (flow_kind, 'c) t }
-  | Sample of (balance_kind, 'c) t
+  | Pointwise_of_flow of (flow_kind, 'c) t
+  | Pointwise_of_balance of (balance_kind, 'c) t
+  | Flow_of_pointwise of (pointwise_kind, 'c) t
+  | Change_balance of { balance : (balance_kind, 'c) t; default : float }
   | Delay of ('k, 'c) delay
   | Var of float ref
   | Fixpoint of { var : ('k, 'c) t; body : ('k, 'c) t; tol : float; max_iter : int; guess : float }
@@ -179,7 +188,7 @@ val round : int -> ('k, 'c) t -> ('k, 'c) t
 val sum : ?name:string -> 'k kind -> ('k, 'c) t list -> ('k, 'c) t
 (** Pointwise sum. The empty list produces [0.0]. *)
 
-val where : cond:(flow_kind, 'x) t -> then_:('k, 'c) t -> else_:('k, 'c) t -> ('k, 'c) t
+val where : cond:('cond, 'x) t -> then_:('k, 'c) t -> else_:('k, 'c) t -> ('k, 'c) t
 (** Pointwise conditional. *)
 
 (** {1 Cross-period and bridges} *)
@@ -206,8 +215,17 @@ val accumulate :
 val roll_forward : ?name:string -> init:float -> (flow_kind, 'c) t -> (balance_kind, 'c) t
 (** Specialized accumulation for balance roll-forwards: prior balance plus current flow. *)
 
-val sample : ?name:string -> (balance_kind, 'c) t -> (flow_kind, 'c) t
-(** Pointwise balance-to-flow bridge. *)
+val pointwise_of_flow : ?name:string -> (flow_kind, 'c) t -> (pointwise_kind, 'c) t
+(** Converts a flow to per-cell semantics. *)
+
+val pointwise_of_balance : ?name:string -> (balance_kind, 'c) t -> (pointwise_kind, 'c) t
+(** Converts a balance to per-cell semantics. *)
+
+val flow_of_pointwise : ?name:string -> (pointwise_kind, 'c) t -> (flow_kind, 'c) t
+(** Converts a pointwise series back to an approximate flow. *)
+
+val change_balance : ?name:string -> (balance_kind, 'c) t -> default:float -> (flow_kind, 'c) t
+(** Per-period delta of a balance, represented as a flow. *)
 
 val convert : rate:float -> ('k, 'c1) t -> ('k, 'c2) t
 (** Currency-tag-changing scalar multiplication. *)
@@ -300,16 +318,25 @@ module Query : sig
   (** Sum of period values over [[start_date, end_date)]. *)
 end
 
-val exact_accrual :
-  Timeline.t -> (flow_kind, 'c) t -> (start_date:Date.t -> end_date:Date.t -> float) option
-(** [exact_accrual tl f] returns an exact range-query implementation when the flow AST is composed
-    only from provenance-preserving constructors ({!of_events}, {!of_periods}, {!add}, {!sub},
-    {!scale}, {!neg}, {!sum}). *)
+type query_mode =
+  | Exact
+  | Approx  (** Whether a materialized query is semantically exact or approximate. *)
 
-val exact_at : Timeline.t -> (balance_kind, 'c) t -> (prorater:prorater -> Date.t -> float) option
-(** [exact_at tl b] returns an exact point-query implementation when the balance AST has intrinsic
-    point-in-time semantics (for example {!roll_forward}, {!of_observations}, and pointwise
-    combinations of exact balances). *)
+type flow_query = {
+  mode : query_mode;
+  accrue : prorater:prorater -> start_date:Date.t -> end_date:Date.t -> float;
+}
+(** Materialized flow query capability. *)
+
+type balance_query = { mode : query_mode; at : prorater:prorater -> Date.t -> float }
+(** Materialized balance query capability. *)
+
+val flow_query : Timeline.t -> float array -> (flow_kind, 'c) t -> flow_query
+(** Conservative flow query builder. Exact mode is reserved for provenance-preserving flow ASTs. *)
+
+val balance_query : Timeline.t -> float array -> (balance_kind, 'c) t -> balance_query
+(** Conservative balance query builder. Exact mode is reserved for balances with trustworthy
+    point-in-time semantics. *)
 
 (** {1 Dependency graph} *)
 

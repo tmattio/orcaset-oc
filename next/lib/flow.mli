@@ -13,7 +13,7 @@
 
     Exact accrual is derived from the flow AST itself. Exact algebra (`add`, `sub`, `scale`, `neg`,
     `sum`) preserves exact accrual. Cell-local transforms (`map`, `map2`, `mul`, `div`, and related
-    operators) usually fall back to approximate prorating. *)
+    operators) and any {!Pointwise.to_flow_approx} bridge fall back to approximate prorating. *)
 
 type 'c t
 (** The type for flows tagged with currency or unit ['c]. *)
@@ -172,8 +172,11 @@ module Materialized : sig
   type query_mode =
     | Exact
     | Approx
-        (** Whether {!accrue} uses an AST-derived exact accrual rule or falls back to prorating the
-            materialized cells. *)
+        (** Whether {!accrue} is semantically exact or approximate.
+
+            [Exact] is reserved for provenance-preserving flows such as {!of_events}, {!of_periods},
+            and their exact linear compositions. [Approx] means Orcaset answers using timeline-cell
+            semantics. *)
 
   type 'c t
   (** Materialized flow values paired with their evaluation timeline. *)
@@ -184,7 +187,7 @@ module Materialized : sig
       This is a low-level constructor. {!eval} is usually what you want. *)
 
   val query_mode : 'c t -> query_mode
-  (** [query_mode m] reports whether date-range accrual is exact or approximate. *)
+  (** [query_mode m] reports whether date-range accrual is safe to trust as exact. *)
 
   val timeline : 'c t -> Timeline.t
   (** [timeline m] is the timeline [m] was evaluated against. *)
@@ -218,7 +221,9 @@ module Materialized : sig
 
       When [query_mode m = Exact], Orcaset accrues from exact AST semantics (events,
       source-period overlap, and exact linear compositions). Otherwise it falls back to prorating
-      materialized period values with [prorater]. *)
+      materialized period values with [prorater].
+
+      Range semantics are half-open: [start_date] is included and [end_date] is excluded. *)
 end
 
 val eval : Timeline.t -> 'c t -> 'c Materialized.t

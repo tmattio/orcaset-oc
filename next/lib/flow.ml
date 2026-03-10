@@ -69,20 +69,16 @@ let unsafe_of_formula f = f
 (* Materialized *)
 
 module Materialized = struct
-  type query_mode = Exact | Approx
-
-  type 'c t = {
-    timeline : Timeline.t;
-    values : float array;
-    exact_accrual : (start_date:Date.t -> end_date:Date.t -> float) option;
-  }
+  type query_mode = Formula.query_mode = Exact | Approx
+  type 'c t = { timeline : Timeline.t; values : float array; query : Formula.flow_query }
 
   let make timeline values =
     if Array.length values <> Timeline.length timeline then
       invalid_arg "Flow.Materialized.make: array length does not match timeline length";
-    { timeline; values; exact_accrual = None }
+    let query = Formula.flow_query timeline values (Formula.of_array Formula.Flow_k values) in
+    { timeline; values; query = { query with mode = Approx } }
 
-  let query_mode m = match m.exact_accrual with Some _ -> Exact | None -> Approx
+  let query_mode m = m.query.mode
   let timeline m = m.timeline
   let to_array m = Array.copy m.values
   let unsafe_values m = m.values
@@ -104,15 +100,13 @@ module Materialized = struct
     !acc
 
   let accrue ?(prorater = Formula.default_prorater) m ~start_date ~end_date =
-    match m.exact_accrual with
-    | Some f -> f ~start_date ~end_date
-    | None -> Formula.Query.accrue ~prorater m.timeline m.values ~start_date ~end_date
+    m.query.accrue ~prorater ~start_date ~end_date
 end
 
 let eval tl f =
   let values = Formula.eval tl f in
-  let exact_accrual = Formula.exact_accrual tl f in
-  { Materialized.timeline = tl; values; exact_accrual }
+  let query = Formula.flow_query tl values f in
+  { Materialized.timeline = tl; values; query }
 
 let eval_values tl f = Formula.eval tl f
 
@@ -120,8 +114,8 @@ let eval_many tl flows =
   let value_arrays = Formula.eval_many tl flows in
   List.map2
     (fun flow values ->
-      let exact_accrual = Formula.exact_accrual tl flow in
-      { Materialized.timeline = tl; values; exact_accrual })
+      let query = Formula.flow_query tl values flow in
+      { Materialized.timeline = tl; values; query })
     flows value_arrays
 
 module Deps = struct

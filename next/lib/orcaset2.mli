@@ -38,8 +38,8 @@
 
     {1 Modules}
 
-    {!modules:Date Period Daycount Calendar Timeline Schedule Key Scope Prorater Flow Balance
-    Statement} *)
+    {!modules:Date Period Daycount Calendar Timeline Schedule Key Scope Prorater Pointwise Flow
+    Balance Statement} *)
 
 module Date : module type of Date
 (** Gregorian calendar dates. *)
@@ -104,6 +104,9 @@ module Scope : module type of Scope
 
 module Prorater : module type of Prorater
 (** Allocate a full-period value to a sub-range. *)
+
+module Pointwise : module type of Pointwise
+(** Per-cell values without interval or point-in-time query semantics. *)
 
 module Flow : sig
   (** Interval quantities (flows).
@@ -292,7 +295,7 @@ module Flow : sig
     (** The type for materialized flow results. Each value is bound to its period. *)
 
     val query_mode : _ t -> query_mode
-    (** [query_mode m] reports whether date-range accrual is exact or approximate. *)
+    (** [query_mode m] reports whether date-range accrual is safe to trust as exact. *)
 
     val timeline : _ t -> Timeline.t
     (** [timeline m] is the timeline [m] was evaluated against. *)
@@ -324,7 +327,8 @@ module Flow : sig
         When [query_mode m = Exact], the query is answered from exact AST semantics (events,
         source-period overlap, and exact linear compositions). Otherwise it falls back to [prorater]
         (default: pro-rata by day count). Returns [0.0] if the date range does not overlap the
-        timeline. *)
+        timeline. Range semantics are half-open: [start_date] is included and [end_date] is
+        excluded. *)
   end
 
   val eval : Timeline.t -> 'c t -> 'c Materialized.t
@@ -424,6 +428,11 @@ module Balance : sig
       intrinsically in the private typed AST and used by {!Materialized.at} for exact point queries.
   *)
 
+  val roll_forward_with :
+    ?name:string -> init:float -> (acc:float -> x:float -> float) -> 'c Flow.t -> 'c t
+  (** [roll_forward_with ~init f flow] is like {!roll_forward} but uses [f] as the accumulation
+      step. Point queries are conservative and report approximate mode. *)
+
   (** {1:naming Naming} *)
 
   val named : string -> 'c t -> 'c t
@@ -483,20 +492,13 @@ module Balance : sig
   (** [at_period_end b] is [b] (identity). A balance naturally represents the end-of-period value.
   *)
 
-  (** {1:sample Bridge to Flow} *)
-
-  val sample : ?name:string -> 'c t -> 'c Flow.t
-  (** [sample b] reads the end-of-period balance value at each period as a flow series. This is the
-      primary cross-type bridge: it lets balance values participate in flow arithmetic without
-      escape hatches.
-
-      {b Note.} The resulting flow is a sampled point-in-time value, not an interval quantity.
-      Date-range accrual ({!Flow.Materialized.accrue}) on the result is not meaningful. Use it for
-      per-period calculations (e.g. [Flow.mul (Balance.sample bal) year_frac]). *)
+  (** {1:bridge_to_flow Bridge to Flow} *)
 
   val change : 'c t -> default:float -> 'c Flow.t
   (** [change b ~default] is the per-period change in [b], as a flow. At period 0, the change is
-      [b.(0) - default]. At period [i > 0], the change is [b.(i) - b.(i-1)]. *)
+      [b.(0) - default]. At period [i > 0], the change is [b.(i) - b.(i-1)].
+
+      Use {!Pointwise.of_balance} for per-cell arithmetic on balances. *)
 
   (** {1:feedback Feedback} *)
 
@@ -511,11 +513,21 @@ module Balance : sig
       {[
         let balance, (interest, principal) =
           Balance.feedback ~default:loan_amount (fun prev_bal ->
-              let interest = Flow.scale (-.rate) (Flow.mul (Balance.sample prev_bal) year_fracs) in
+              let interest =
+                Flow.scale (-.rate)
+                  (Pointwise.to_flow_approx
+                     (Pointwise.mul (Pointwise.of_balance prev_bal) (Pointwise.of_flow year_fracs)))
+              in
               let principal = Flow.sub total_pmt interest in
               let bal = Balance.roll_forward ~init:loan_amount principal in
               (bal, (interest, principal)))
       ]} *)
+
+  val fixpoint :
+    ?name:string -> ?tol:float -> ?max_iter:int -> guess:float -> ('c t -> 'c t) -> 'c t
+  (** [fixpoint ~guess f] solves a same-period fixed point in each period. Point queries are
+      conservative and report approximate mode unless the resulting balance has intrinsically exact
+      semantics. *)
 
   (** {1:convert Currency conversion} *)
 
@@ -537,7 +549,7 @@ module Balance : sig
     (** The type for materialized balance results. Each value is bound to its period. *)
 
     val query_mode : _ t -> query_mode
-    (** [query_mode m] reports whether point queries are exact or approximate. *)
+    (** [query_mode m] reports whether point queries are safe to trust as exact. *)
 
     val timeline : _ t -> Timeline.t
     (** [timeline m] is the timeline [m] was evaluated against. *)
@@ -567,8 +579,8 @@ module Balance : sig
     (** [at m date] is the balance at [date].
 
         When [query_mode m = Exact], the answer is derived from intrinsic AST semantics (for example
-        {!val:roll_forward}, {!val:of_dates}, and exact pointwise combinations). Otherwise it falls
-        back to the current period's end-of-period value.
+        {!val:of_dates}, exact {!val:at_period_start}, and exact pointwise combinations). Otherwise
+        it falls back to approximate timeline-cell semantics.
 
         Raises [Invalid_argument] if [date] is outside the timeline. *)
   end

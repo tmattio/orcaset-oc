@@ -11,9 +11,10 @@
     You materialize a balance against a {!Timeline.t} with {!eval}. You then call {!Materialized.at}
     to interpolate the balance at a specific date.
 
-    Exact interpolation is derived from the balance AST itself. A balance built from {!roll_forward}
-    or {!of_dates} can stay exact through pointwise balance operations such as {!add}, {!sub},
-    {!map}, and {!map2}. *)
+    Exact interpolation is conservative. Orcaset reports {!Materialized.query_mode} as [Exact] only
+    when the balance AST has trustworthy point-in-time semantics, such as {!const}, {!of_dates},
+    exact {!prev}, and exact pointwise compositions of exact balances. A {!roll_forward} stays exact
+    only when the underlying flow has exact range semantics. *)
 
 type 'c t
 (** The type for balances tagged with currency or unit ['c]. *)
@@ -49,8 +50,9 @@ val of_observations : ?name:string -> ?before_first:float -> (Date.t * float) li
 val roll_forward : ?name:string -> init:float -> 'c Flow.t -> 'c t
 (** [roll_forward ~init flow] accumulates [flow] into a running balance starting from [init].
 
-    This is the fundamental flow-to-balance bridge. Materialized interpolation stays exact because
-    the balance keeps the roll-forward semantics in the AST itself. *)
+    This is the fundamental flow-to-balance bridge. Materialized interpolation is exact only when
+    [flow] has exact range-query semantics. Otherwise Orcaset still interpolates using the
+    roll-forward shape, but reports approximate query mode. *)
 
 val roll_forward_with :
   ?name:string -> init:float -> (acc:float -> x:float -> float) -> 'c Flow.t -> 'c t
@@ -121,16 +123,14 @@ val at_period_start : ?name:string -> 'c t -> default:float -> 'c t
 val at_period_end : 'c t -> 'c t
 (** [at_period_end b] is [b]. A balance naturally denotes the end-of-period value. *)
 
-(** {1 Bridge to Flow} *)
-
-val sample : ?name:string -> 'c t -> 'c Flow.t
-(** [sample b] reads the end-of-period balance value at each period as a flow.
-
-    This is a pointwise bridge: it is suitable for per-period arithmetic such as interest
-    calculations, but date-range accrual on the resulting flow is only approximate. *)
+(** {1 Bridge to Flow and Pointwise} *)
 
 val change : 'c t -> default:float -> 'c Flow.t
-(** [change b ~default] is the per-period delta of [b]. *)
+(** [change b ~default] is the per-period delta of [b], as a flow.
+
+    This is a real flow bridge: each cell is the period-over-period change in the balance. The
+    resulting flow is still approximate for arbitrary intra-period accrual. Use {!Pointwise} for
+    per-cell arithmetic on balances. *)
 
 (** {1 Feedback / fixpoint} *)
 
@@ -154,8 +154,11 @@ module Materialized : sig
   type query_mode =
     | Exact
     | Approx
-        (** Whether {!at} uses an AST-derived exact interpolation rule or falls back to the
-            enclosing period's materialized value. *)
+        (** Whether {!at} is semantically exact or approximate.
+
+            [Exact] means the balance has trustworthy point-in-time semantics at queried dates.
+            [Approx] means Orcaset falls back to timeline-cell semantics, even if the internal
+            interpolation closure is smarter than "just return the period value". *)
 
   type 'c t
   (** Materialized balance values paired with their evaluation timeline. *)
@@ -166,7 +169,7 @@ module Materialized : sig
       This is a low-level constructor. {!eval} is usually what you want. *)
 
   val query_mode : 'c t -> query_mode
-  (** [query_mode m] reports whether point queries are exact or approximate. *)
+  (** [query_mode m] reports whether point queries are safe to trust as exact. *)
 
   val timeline : 'c t -> Timeline.t
   (** [timeline m] is the timeline [m] was evaluated against. *)
@@ -198,9 +201,11 @@ module Materialized : sig
   val at : ?prorater:Prorater.t -> 'c t -> Date.t -> float
   (** [at m date] interpolates the balance at [date].
 
-      When [query_mode m = Exact], Orcaset interpolates from intrinsic AST semantics (for example
-      observations and roll-forwards). Otherwise it falls back to the enclosing period's
-      materialized value. *)
+      When [query_mode m = Exact], Orcaset interpolates from intrinsic AST semantics. Otherwise it
+      answers from approximate timeline-cell semantics.
+
+      Period lookup follows {!Timeline.find_index}: periods are start-inclusive and end-exclusive,
+      except the last period which is end-inclusive. *)
 end
 
 val eval : Timeline.t -> 'c t -> 'c Materialized.t

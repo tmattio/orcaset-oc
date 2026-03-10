@@ -199,12 +199,18 @@ let loan_bench n () =
   let year_fracs = Flow.year_frac Daycount.thirty_360_us in
   let balance, (interest, principal) =
     Balance.feedback ~default:loan_amount (fun prev_bal ->
-        let interest = Flow.scale (-.annual_rate) (Flow.mul (Balance.sample prev_bal) year_fracs) in
+        let interest =
+          Flow.scale (-.annual_rate)
+            (Pointwise.to_flow_approx
+               (Pointwise.mul (Pointwise.of_balance prev_bal) (Pointwise.of_flow year_fracs)))
+        in
         let principal = Flow.sub total_pmt interest in
         let balance = Balance.roll_forward ~init:loan_amount principal in
         (balance, (balance, (interest, principal))))
   in
-  ignore (Flow.eval_many tl [ Balance.sample balance; interest; principal ])
+  ignore
+    (Flow.eval_many tl
+       [ Pointwise.to_flow_approx (Pointwise.of_balance balance); interest; principal ])
 
 let loan_benchmarks = sized [ 12; 120; 360 ] loan_bench
 
@@ -292,7 +298,9 @@ let proforma_bench =
     let _debt_balance, (debt_interest, debt_principal) =
       Balance.feedback ~default:pf_loan_amount (fun prev_bal ->
           let interest =
-            Flow.scale (-.interest_rate) (Flow.mul (Balance.sample prev_bal) year_fracs)
+            Flow.scale (-.interest_rate)
+              (Pointwise.to_flow_approx
+                 (Pointwise.mul (Pointwise.of_balance prev_bal) (Pointwise.of_flow year_fracs)))
           in
           let principal = Flow.sub total_pmt interest in
           let balance = Balance.roll_forward ~init:pf_loan_amount principal in

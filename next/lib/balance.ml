@@ -47,12 +47,7 @@ let where ~cond ~then_ ~else_ = Formula.where ~cond:(Flow.unsafe_to_formula cond
 let prev ?name src ~default = Formula.prev ?name src ~default
 let at_period_start ?name b ~default = prev ?name b ~default
 let at_period_end b = b
-let sample ?name b = Flow.unsafe_of_formula (Formula.sample ?name b)
-
-let change b ~default =
-  let cur = sample b in
-  let prev = Flow.prev cur ~default in
-  Flow.sub cur prev
+let change b ~default = Flow.unsafe_of_formula (Formula.change_balance b ~default)
 
 (* Feedback / fixpoint *)
 
@@ -73,20 +68,16 @@ let unsafe_of_formula b = b
 (* Materialized *)
 
 module Materialized = struct
-  type query_mode = Exact | Approx
-
-  type 'c t = {
-    timeline : Timeline.t;
-    values : float array;
-    exact_at : (prorater:Formula.prorater -> Date.t -> float) option;
-  }
+  type query_mode = Formula.query_mode = Exact | Approx
+  type 'c t = { timeline : Timeline.t; values : float array; query : Formula.balance_query }
 
   let make timeline values =
     if Array.length values <> Timeline.length timeline then
       invalid_arg "Balance.Materialized.make: array length does not match timeline length";
-    { timeline; values; exact_at = None }
+    let query = Formula.balance_query timeline values (Formula.of_array Formula.Balance_k values) in
+    { timeline; values; query = { query with mode = Approx } }
 
-  let query_mode m = match m.exact_at with Some _ -> Exact | None -> Approx
+  let query_mode m = m.query.mode
   let timeline m = m.timeline
   let to_array m = Array.copy m.values
   let unsafe_values m = m.values
@@ -113,13 +104,13 @@ module Materialized = struct
         invalid_arg
           (Printf.sprintf "Balance.Materialized.at: date %s is outside the timeline"
              (Date.to_string date))
-    | Some i -> ( match m.exact_at with Some f -> f ~prorater date | None -> m.values.(i))
+    | Some _ -> m.query.at ~prorater date
 end
 
 let eval tl b =
   let values = Formula.eval tl b in
-  let exact_at = Formula.exact_at tl b in
-  { Materialized.timeline = tl; values; exact_at }
+  let query = Formula.balance_query tl values b in
+  { Materialized.timeline = tl; values; query }
 
 let eval_values tl b = Formula.eval tl b
 

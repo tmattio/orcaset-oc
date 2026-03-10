@@ -12,9 +12,26 @@ let fla msg exp act =
   Array.iteri (fun i e -> fl (Printf.sprintf "%s[%d]" msg i) e act.(i)) exp
 
 let ev msg tl s exp = fla msg exp (Flow.Materialized.to_array (Flow.eval tl s))
+let ep msg tl s exp = fla msg exp (Pointwise.Materialized.to_array (Pointwise.eval tl s))
 let ds msg exp d = check string msg exp (Date.to_string d)
 let raises msg exn f = check_raises msg exn (fun () -> ignore (f ()))
 let invalid msg f = raises msg (Invalid_argument msg) f
+
+let flow_mode msg exp m =
+  let actual =
+    match Flow.Materialized.query_mode m with
+    | Flow.Materialized.Exact -> "Exact"
+    | Approx -> "Approx"
+  in
+  check string msg exp actual
+
+let balance_mode msg exp m =
+  let actual =
+    match Balance.Materialized.query_mode m with
+    | Balance.Materialized.Exact -> "Exact"
+    | Approx -> "Approx"
+  in
+  check string msg exp actual
 
 let to_s f =
   let buf = Buffer.create 256 in
@@ -33,6 +50,7 @@ let has sub s =
     loop 0
 
 let tl3 = Timeline.monthly ~start_date:(date 2025 1 1) ~n:3
+let sampled b = Pointwise.to_flow_approx (Pointwise.of_balance b)
 
 (* Date *)
 
@@ -293,13 +311,9 @@ let test_flow_cross_period () =
   let flow = Flow.of_array [| 100.0; 200.0; 300.0 |] in
   (* prev via at_period_start: default at period 0, then previous value *)
   let as_balance = Balance.of_array [| 100.0; 200.0; 300.0 |] in
-  ev "prev" tl3
-    (Balance.sample (Balance.at_period_start as_balance ~default:0.0))
-    [| 0.0; 100.0; 200.0 |];
+  ev "prev" tl3 (sampled (Balance.at_period_start as_balance ~default:0.0)) [| 0.0; 100.0; 200.0 |];
   (* cumsum via roll_forward + sample *)
-  ev "cumsum" tl3
-    (Balance.sample (Balance.roll_forward ~init:1000.0 flow))
-    [| 1100.0; 1300.0; 1600.0 |]
+  ev "cumsum" tl3 (sampled (Balance.roll_forward ~init:1000.0 flow)) [| 1100.0; 1300.0; 1600.0 |]
 
 (* Flow: feedback *)
 
@@ -356,7 +370,7 @@ let test_flow_fixpoint () =
   ev "fixpoint+feedback" tl3
     (Flow.feedback ~default:100.0 (fun prev_bal ->
          let flow = Flow.fixpoint ~guess:0.0 (fun x -> Flow.scale 0.5 (Flow.add x prev_bal)) in
-         let balance = Balance.sample (Balance.roll_forward ~init:100.0 flow) in
+         let balance = sampled (Balance.roll_forward ~init:100.0 flow) in
          (balance, balance)))
     [| 200.0; 400.0; 800.0 |];
   (* divergence: x = 2x+1 *)
@@ -452,6 +466,45 @@ let test_query () =
   invalid "Balance.Materialized.at: date 2024-01-01 is outside the timeline" (fun () ->
       ignore (Balance.Materialized.at bal_m (date 2024 1 1)))
 
+let test_query_modes () =
+  let tl = Timeline.monthly ~start_date:(date 2025 1 1) ~n:3 in
+  flow_mode "flow const approx" "Approx" (Flow.eval tl (Flow.const 100.0));
+  flow_mode "flow init approx" "Approx" (Flow.eval tl (Flow.init (fun _ -> 100.0)));
+  flow_mode "flow growth approx" "Approx"
+    (Flow.eval tl (Flow.growth_simple ~start_date:(date 2025 1 1) ~rate:0.05 100.0));
+  flow_mode "flow year_frac approx" "Approx" (Flow.eval tl (Flow.year_frac Daycount.actual_360));
+  flow_mode "flow map approx" "Approx" (Flow.eval tl (Flow.map (( *. ) 2.0) (Flow.const 10.0)));
+  flow_mode "flow pointwise bridge approx" "Approx"
+    (Flow.eval tl
+       (Pointwise.to_flow_approx
+          (Pointwise.mul (Pointwise.of_flow (Flow.const 10.0)) (Pointwise.of_flow (Flow.const 2.0)))));
+  flow_mode "flow events exact" "Exact"
+    (Flow.eval tl (Flow.of_events [ (date 2025 1 15, 100.0); (date 2025 2 15, 200.0) ]));
+  flow_mode "flow periods exact" "Exact"
+    (Flow.eval tl
+       (Flow.of_periods
+          [
+            (Period.make ~start_date:(date 2025 1 1) ~end_date:(date 2025 2 1), 100.0);
+            (Period.make ~start_date:(date 2025 2 1) ~end_date:(date 2025 3 1), 200.0);
+          ]));
+  balance_mode "balance const exact" "Exact" (Balance.eval tl (Balance.const 100.0));
+  balance_mode "balance dates exact" "Exact"
+    (Balance.eval tl (Balance.of_dates [ (date 2025 1 15, 100.0); (date 2025 2 15, 200.0) ]));
+  balance_mode "balance prev exact" "Exact"
+    (Balance.eval tl
+       (Balance.at_period_start (Balance.of_dates [ (date 2025 1 15, 100.0) ]) ~default:0.0));
+  balance_mode "balance roll_forward approx const" "Approx"
+    (Balance.eval tl (Balance.roll_forward ~init:1000.0 (Flow.const 100.0)));
+  balance_mode "balance roll_forward approx year_frac" "Approx"
+    (Balance.eval tl (Balance.roll_forward ~init:1000.0 (Flow.year_frac Daycount.actual_360)));
+  balance_mode "balance roll_forward_with approx" "Approx"
+    (Balance.eval tl
+       (Balance.roll_forward_with ~init:1000.0
+          (fun ~acc ~x -> acc +. x)
+          (Flow.of_events [ (date 2025 1 15, 100.0) ])));
+  balance_mode "balance fixpoint approx" "Approx"
+    (Balance.eval tl (Balance.fixpoint ~guess:1.0 (fun x -> Balance.scale 0.5 x)))
+
 (* Materialized *)
 
 let test_materialized () =
@@ -468,6 +521,23 @@ let test_materialized () =
   let count = ref 0 in
   Flow.Materialized.iter (fun _p _v -> incr count) m;
   check int "iter count" 3 !count
+
+let test_pointwise () =
+  ep "of_flow" tl3 (Pointwise.of_flow (Flow.of_array [| 1.0; 2.0; 3.0 |])) [| 1.0; 2.0; 3.0 |];
+  ep "of_balance" tl3
+    (Pointwise.of_balance (Balance.of_array [| 10.0; 20.0; 30.0 |]))
+    [| 10.0; 20.0; 30.0 |];
+  ep "map2" tl3
+    (Pointwise.map2 ( +. )
+       (Pointwise.of_flow (Flow.of_array [| 1.0; 2.0; 3.0 |]))
+       (Pointwise.of_balance (Balance.of_array [| 10.0; 20.0; 30.0 |])))
+    [| 11.0; 22.0; 33.0 |];
+  ev "to_flow_approx" tl3
+    (Pointwise.to_flow_approx
+       (Pointwise.mul
+          (Pointwise.of_balance (Balance.of_array [| 10.0; 20.0; 30.0 |]))
+          (Pointwise.of_flow (Flow.of_array [| 0.1; 0.2; 0.3 |]))))
+    [| 1.0; 4.0; 9.0 |]
 
 (* Statement *)
 
@@ -992,7 +1062,10 @@ let test_balance () =
   (* feedback: interest accrual on previous balance *)
   let balance2, interest =
     Balance.feedback ~default:100.0 (fun prev_bal ->
-        let interest = Flow.map (fun b -> b *. 0.01) (Balance.sample prev_bal) in
+        let interest =
+          Pointwise.to_flow_approx
+            (Pointwise.map (fun b -> b *. 0.01) (Pointwise.of_balance prev_bal))
+        in
         let balance = Balance.roll_forward ~init:100.0 interest in
         (balance, (balance, interest)))
   in
@@ -1149,6 +1222,7 @@ let () =
       ("Prorater", [ test_case "prorater" `Quick test_prorater ]);
       ("Calendar", [ test_case "calendar" `Quick test_calendar ]);
       ("Schedule", [ test_case "schedule" `Quick test_schedule ]);
+      ("Pointwise", [ test_case "pointwise" `Quick test_pointwise ]);
       ( "Flow combinators",
         [
           test_case "constructors" `Quick test_flow_constructors;
@@ -1158,6 +1232,7 @@ let () =
           test_case "fixpoint" `Quick test_flow_fixpoint;
           test_case "growth" `Quick test_flow_growth;
           test_case "query" `Quick test_query;
+          test_case "query modes" `Quick test_query_modes;
         ] );
       ("Materialized", [ test_case "materialized" `Quick test_materialized ]);
       ("Statement", [ test_case "statement" `Quick test_statement ]);
