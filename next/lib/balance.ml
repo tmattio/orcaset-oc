@@ -47,6 +47,7 @@ let where ~cond ~then_ ~else_ = Formula.where ~cond:(Flow.unsafe_to_formula cond
 let prev ?name src ~default = Formula.prev ?name src ~default
 let at_period_start ?name b ~default = prev ?name b ~default
 let at_period_end b = b
+let to_flow_approx ?name b = Flow.unsafe_of_formula (Formula.balance_to_flow_approx ?name b)
 let change b ~default = Flow.unsafe_of_formula (Formula.change_balance b ~default)
 
 (* Feedback / fixpoint *)

@@ -38,8 +38,8 @@
 
     {1 Modules}
 
-    {!modules:Date Period Daycount Calendar Timeline Schedule Key Scope Prorater Pointwise Flow
-    Balance Statement} *)
+    {!modules:Date Period Daycount Calendar Timeline Schedule Key Scope Prorater Flow Balance
+    Statement} *)
 
 module Date : module type of Date
 (** Gregorian calendar dates. *)
@@ -104,9 +104,6 @@ module Scope : module type of Scope
 
 module Prorater : module type of Prorater
 (** Allocate a full-period value to a sub-range. *)
-
-module Pointwise : module type of Pointwise
-(** Per-cell values without interval or point-in-time query semantics. *)
 
 module Flow : sig
   (** Interval quantities (flows).
@@ -498,7 +495,14 @@ module Balance : sig
   (** [change b ~default] is the per-period change in [b], as a flow. At period 0, the change is
       [b.(0) - default]. At period [i > 0], the change is [b.(i) - b.(i-1)].
 
-      Use {!Pointwise.of_balance} for per-cell arithmetic on balances. *)
+      Use {!to_flow_approx} for approximate per-cell arithmetic on balances. *)
+
+  val to_flow_approx : ?name:string -> 'c t -> 'c Flow.t
+  (** [to_flow_approx b] reads the materialized cell values of [b] as a flow.
+
+      This is an approximate bridge for per-period arithmetic. The resulting flow preserves cell
+      values, but it does not gain intrinsic interval semantics. Date-range accrual on the result
+      is approximate. Use {!change} for genuine period-over-period deltas. *)
 
   (** {1:feedback Feedback} *)
 
@@ -514,9 +518,7 @@ module Balance : sig
         let balance, (interest, principal) =
           Balance.feedback ~default:loan_amount (fun prev_bal ->
               let interest =
-                Flow.scale (-.rate)
-                  (Pointwise.to_flow_approx
-                     (Pointwise.mul (Pointwise.of_balance prev_bal) (Pointwise.of_flow year_fracs)))
+                Flow.scale (-.rate) (Flow.mul (Balance.to_flow_approx prev_bal) year_fracs)
               in
               let principal = Flow.sub total_pmt interest in
               let bal = Balance.roll_forward ~init:loan_amount principal in

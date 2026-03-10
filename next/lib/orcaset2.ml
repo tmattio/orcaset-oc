@@ -12,7 +12,6 @@ module Schedule = Schedule
 module Key = Key
 module Scope = Scope
 module Prorater = Prorater
-module Pointwise = Pointwise
 module Flow = Flow
 module Balance = Balance
 module Statement = Statement

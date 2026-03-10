@@ -59,12 +59,11 @@ let shocks =
       (sum_uniforms -. 6.0) *. non_recurring_volatility)
 
 (* Balance.roll_forward accumulates shocks into a running walk, then
-   Pointwise makes the per-cell bridge back to an approximate flow. *)
+   Balance.to_flow_approx makes the per-cell bridge back to an approximate flow. *)
 let non_recurring_revenue =
-  Pointwise.to_flow_approx ~name:"Non-Recurring Revenue"
-    (Pointwise.of_balance
-       (Balance.roll_forward ~init:non_recurring_first
-          (Flow.map (fun x -> non_recurring_drift +. x) shocks)))
+  Balance.to_flow_approx ~name:"Non-Recurring Revenue"
+    (Balance.roll_forward ~init:non_recurring_first
+       (Flow.map (fun x -> non_recurring_drift +. x) shocks))
 
 (* Cost of Revenue *)
 

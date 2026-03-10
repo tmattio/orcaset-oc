@@ -17,13 +17,7 @@ type flow_kind
 type balance_kind
 (** Semantic kind for point-in-time quantities. *)
 
-type pointwise_kind
-(** Semantic kind for per-cell values without interval or point-in-time query semantics. *)
-
-type _ kind =
-  | Flow_k : flow_kind kind
-  | Balance_k : balance_kind kind
-  | Pointwise_k : pointwise_kind kind
+type _ kind = Flow_k : flow_kind kind | Balance_k : balance_kind kind
 
 type prorater = Prorater.t
 (** A prorater allocates a full-period value to a sub-range of that period.
@@ -37,7 +31,7 @@ val default_prorater : prorater
 (** Default prorater. Uses {!Prorater.actual_days}. *)
 
 type ('k, 'c) t = private { id : int; name : string option; kind : 'k kind; node : ('k, 'c) node }
-and any_series = Any_series : ('k, 'c) t -> any_series
+and any_flow = Any_flow : (flow_kind, 'c) t -> any_flow
 and ('k, 'c) delay = private { mutable resolved : ('k, 'c) t option; thunk : unit -> ('k, 'c) t }
 
 and ('k, 'c) node =
@@ -75,14 +69,12 @@ and ('k, 'c) node =
   | Map of (float -> float) * ('k, 'c) t
   | Map2 of (float -> float -> float) * ('k, 'c) t * ('k, 'c) t
   | Sum of ('k, 'c) t list
-  | Where of { cond : any_series; then_ : ('k, 'c) t; else_ : ('k, 'c) t }
+  | Where of { cond : any_flow; then_ : ('k, 'c) t; else_ : ('k, 'c) t }
   | Prev of { src : ('k, 'c) t; default : float }
   | Scan_flow of { init : float; f : acc:float -> x:float -> float; flow : (flow_kind, 'c) t }
   | Accumulate of { init : float; f : acc:float -> x:float -> float; flow : (flow_kind, 'c) t }
   | Roll_forward of { init : float; flow : (flow_kind, 'c) t }
-  | Pointwise_of_flow of (flow_kind, 'c) t
-  | Pointwise_of_balance of (balance_kind, 'c) t
-  | Flow_of_pointwise of (pointwise_kind, 'c) t
+  | Balance_to_flow_approx of (balance_kind, 'c) t
   | Change_balance of { balance : (balance_kind, 'c) t; default : float }
   | Delay of ('k, 'c) delay
   | Var of float ref
@@ -144,7 +136,7 @@ val of_observations :
   ?name:string -> ?before_first:float -> (Date.t * float) list -> (balance_kind, 'c) t
 (** A balance built from dated observations with last-observation-wins semantics. *)
 
-(** {1 Pointwise combinators} *)
+(** {1 Cell-local combinators} *)
 
 val map : ?name:string -> (float -> float) -> ('k, 'c) t -> ('k, 'c) t
 (** Cell-local unary transform. *)
@@ -153,43 +145,43 @@ val map2 : ?name:string -> (float -> float -> float) -> ('k, 'c) t -> ('k, 'c) t
 (** Cell-local binary transform. *)
 
 val add : ('k, 'c) t -> ('k, 'c) t -> ('k, 'c) t
-(** Pointwise addition. *)
+(** Cell-local addition. *)
 
 val sub : ('k, 'c) t -> ('k, 'c) t -> ('k, 'c) t
-(** Pointwise subtraction. *)
+(** Cell-local subtraction. *)
 
 val mul : ('k, 'c) t -> ('k, 'c) t -> ('k, 'c) t
-(** Pointwise multiplication. *)
+(** Cell-local multiplication. *)
 
 val div : ('k, 'c) t -> ('k, 'c) t -> ('k, 'c) t
-(** Pointwise division. *)
+(** Cell-local division. *)
 
 val neg : ('k, 'c) t -> ('k, 'c) t
-(** Pointwise negation. *)
+(** Cell-local negation. *)
 
 val scale : float -> ('k, 'c) t -> ('k, 'c) t
-(** Pointwise scalar multiplication. *)
+(** Cell-local scalar multiplication. *)
 
 val abs : ('k, 'c) t -> ('k, 'c) t
-(** Pointwise absolute value. *)
+(** Cell-local absolute value. *)
 
 val min : ('k, 'c) t -> ('k, 'c) t -> ('k, 'c) t
-(** Pointwise minimum. *)
+(** Cell-local minimum. *)
 
 val max : ('k, 'c) t -> ('k, 'c) t -> ('k, 'c) t
-(** Pointwise maximum. *)
+(** Cell-local maximum. *)
 
 val clamp : lo:float -> hi:float -> ('k, 'c) t -> ('k, 'c) t
-(** Pointwise clamp to [[lo, hi]]. *)
+(** Cell-local clamp to [[lo, hi]]. *)
 
 val round : int -> ('k, 'c) t -> ('k, 'c) t
-(** Pointwise rounding to a fixed number of decimal places. *)
+(** Cell-local rounding to a fixed number of decimal places. *)
 
 val sum : ?name:string -> 'k kind -> ('k, 'c) t list -> ('k, 'c) t
-(** Pointwise sum. The empty list produces [0.0]. *)
+(** Cell-local sum. The empty list produces [0.0]. *)
 
-val where : cond:('cond, 'x) t -> then_:('k, 'c) t -> else_:('k, 'c) t -> ('k, 'c) t
-(** Pointwise conditional. *)
+val where : cond:(flow_kind, 'x) t -> then_:('k, 'c) t -> else_:('k, 'c) t -> ('k, 'c) t
+(** Cell-local conditional. *)
 
 (** {1 Cross-period and bridges} *)
 
@@ -215,14 +207,8 @@ val accumulate :
 val roll_forward : ?name:string -> init:float -> (flow_kind, 'c) t -> (balance_kind, 'c) t
 (** Specialized accumulation for balance roll-forwards: prior balance plus current flow. *)
 
-val pointwise_of_flow : ?name:string -> (flow_kind, 'c) t -> (pointwise_kind, 'c) t
-(** Converts a flow to per-cell semantics. *)
-
-val pointwise_of_balance : ?name:string -> (balance_kind, 'c) t -> (pointwise_kind, 'c) t
-(** Converts a balance to per-cell semantics. *)
-
-val flow_of_pointwise : ?name:string -> (pointwise_kind, 'c) t -> (flow_kind, 'c) t
-(** Converts a pointwise series back to an approximate flow. *)
+val balance_to_flow_approx : ?name:string -> (balance_kind, 'c) t -> (flow_kind, 'c) t
+(** Converts a balance to an approximate flow by reading each period's balance cell value. *)
 
 val change_balance : ?name:string -> (balance_kind, 'c) t -> default:float -> (flow_kind, 'c) t
 (** Per-period delta of a balance, represented as a flow. *)

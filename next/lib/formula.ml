@@ -15,12 +15,8 @@
 
 type flow_kind
 type balance_kind
-type pointwise_kind
 
-type _ kind =
-  | Flow_k : flow_kind kind
-  | Balance_k : balance_kind kind
-  | Pointwise_k : pointwise_kind kind
+type _ kind = Flow_k : flow_kind kind | Balance_k : balance_kind kind
 
 type prorater = Prorater.t
 
@@ -31,7 +27,7 @@ let next_id =
   fun () -> Atomic.fetch_and_add counter 1
 
 type ('k, 'c) t = { id : int; name : string option; kind : 'k kind; node : ('k, 'c) node }
-and any_series = Any_series : ('k, 'c) t -> any_series
+and any_flow = Any_flow : (flow_kind, 'c) t -> any_flow
 and ('k, 'c) delay = { mutable resolved : ('k, 'c) t option; thunk : unit -> ('k, 'c) t }
 
 and ('k, 'c) node =
@@ -69,14 +65,12 @@ and ('k, 'c) node =
   | Map of (float -> float) * ('k, 'c) t
   | Map2 of (float -> float -> float) * ('k, 'c) t * ('k, 'c) t
   | Sum of ('k, 'c) t list
-  | Where of { cond : any_series; then_ : ('k, 'c) t; else_ : ('k, 'c) t }
+  | Where of { cond : any_flow; then_ : ('k, 'c) t; else_ : ('k, 'c) t }
   | Prev of { src : ('k, 'c) t; default : float }
   | Scan_flow of { init : float; f : acc:float -> x:float -> float; flow : (flow_kind, 'c) t }
   | Accumulate of { init : float; f : acc:float -> x:float -> float; flow : (flow_kind, 'c) t }
   | Roll_forward of { init : float; flow : (flow_kind, 'c) t }
-  | Pointwise_of_flow of (flow_kind, 'c) t
-  | Pointwise_of_balance of (balance_kind, 'c) t
-  | Flow_of_pointwise of (pointwise_kind, 'c) t
+  | Balance_to_flow_approx of (balance_kind, 'c) t
   | Change_balance of { balance : (balance_kind, 'c) t; default : float }
   | Delay of ('k, 'c) delay
   | Var of float ref
@@ -124,7 +118,7 @@ let of_observations ?name ?(before_first = 0.0) observations =
   let sorted_obs = Array.of_list sorted in
   mk ?name Balance_k (Observations { sorted_obs; before_first; cache = ref None })
 
-(* Pointwise combinators.  The simplified design intentionally keeps only a
+(* Cell-local combinators.  The simplified design intentionally keeps only a
    small amount of construction-time simplification. *)
 
 let map ?name f s = mk ?name s.kind (Map (f, s))
@@ -150,7 +144,7 @@ let sum ?name kind ss =
   | [ s ] -> ( match name with Some n -> named n s | None -> s)
   | _ -> mk ?name kind (Sum ss)
 
-let where ~cond ~then_ ~else_ = mk then_.kind (Where { cond = Any_series cond; then_; else_ })
+let where ~cond ~then_ ~else_ = mk then_.kind (Where { cond = Any_flow cond; then_; else_ })
 
 (* Cross-period / bridges *)
 
@@ -158,9 +152,7 @@ let prev ?name src ~default = mk ?name src.kind (Prev { src; default })
 let scan ?name ~init f flow = mk ?name Flow_k (Scan_flow { init; f; flow })
 let accumulate ?name ~init f flow = mk ?name Balance_k (Accumulate { init; f; flow })
 let roll_forward ?name ~init flow = mk ?name Balance_k (Roll_forward { init; flow })
-let pointwise_of_flow ?name flow = mk ?name Pointwise_k (Pointwise_of_flow flow)
-let pointwise_of_balance ?name balance = mk ?name Pointwise_k (Pointwise_of_balance balance)
-let flow_of_pointwise ?name pointwise = mk ?name Flow_k (Flow_of_pointwise pointwise)
+let balance_to_flow_approx ?name balance = mk ?name Flow_k (Balance_to_flow_approx balance)
 let change_balance ?name balance ~default = mk ?name Flow_k (Change_balance { balance; default })
 let convert ~rate s = (Obj.magic (scale rate s) : (_, _) t)
 
@@ -286,13 +278,11 @@ let rec invalidate_period : type k c. eval_ctx -> (k, c) t -> int -> unit =
             invalidate_period ctx a i;
             invalidate_period ctx b i
         | Sum ss -> List.iter (fun src -> invalidate_period ctx src i) ss
-        | Where { cond = Any_series cond; then_; else_ } ->
+        | Where { cond = Any_flow cond; then_; else_ } ->
             invalidate_period ctx cond i;
             invalidate_period ctx then_ i;
             invalidate_period ctx else_ i
-        | Pointwise_of_flow src -> invalidate_period ctx src i
-        | Pointwise_of_balance src -> invalidate_period ctx src i
-        | Flow_of_pointwise src -> invalidate_period ctx src i
+        | Balance_to_flow_approx src -> invalidate_period ctx src i
         | Change_balance { balance; _ } -> invalidate_period ctx balance i
         | Prev _ | Scan_flow _ | Accumulate _ | Roll_forward _ | Fixpoint _ | Delay _ -> ()
       end
@@ -348,7 +338,7 @@ and compute : type k c. eval_ctx -> (k, c) t -> int -> float =
   | Map (f, src) -> f (eval_cell ctx src i)
   | Map2 (f, a, b) -> f (eval_cell ctx a i) (eval_cell ctx b i)
   | Sum ss -> List.fold_left (fun acc src -> acc +. eval_cell ctx src i) 0.0 ss
-  | Where { cond = Any_series cond; then_; else_ } ->
+  | Where { cond = Any_flow cond; then_; else_ } ->
       if eval_cell ctx cond i <> 0.0 then eval_cell ctx then_ i else eval_cell ctx else_ i
   | Prev { src; default } -> if i = 0 then default else eval_cell ctx src (i - 1)
   | Scan_flow { init; f; flow } ->
@@ -362,9 +352,7 @@ and compute : type k c. eval_ctx -> (k, c) t -> int -> float =
   | Roll_forward { init; flow } ->
       let acc = if i = 0 then init else eval_cell ctx s (i - 1) in
       acc +. eval_cell ctx flow i
-  | Pointwise_of_flow flow -> eval_cell ctx flow i
-  | Pointwise_of_balance balance -> eval_cell ctx balance i
-  | Flow_of_pointwise pointwise -> eval_cell ctx pointwise i
+  | Balance_to_flow_approx balance -> eval_cell ctx balance i
   | Change_balance { balance; default } ->
       let prev = if i = 0 then default else eval_cell ctx balance (i - 1) in
       eval_cell ctx balance i -. prev
@@ -573,9 +561,8 @@ let exact_flow_accrual : type c.
                 (fun ~start_date ~end_date ->
                   List.fold_left (fun acc f -> acc +. f ~start_date ~end_date) 0.0 fs)
         | Map _ | Map2 _ | Of_array _ | Init _ | Growth_simple _ | Growth_compound _ | Year_frac _
-        | Where _ | Prev _ | Scan_flow _ | Accumulate _ | Roll_forward _ | Pointwise_of_flow _
-        | Pointwise_of_balance _ | Flow_of_pointwise _ | Change_balance _ | Var _ | Fixpoint _
-        | Const _ | Observations _ ->
+        | Where _ | Prev _ | Scan_flow _ | Accumulate _ | Roll_forward _ | Balance_to_flow_approx _
+        | Change_balance _ | Var _ | Fixpoint _ | Const _ | Observations _ ->
             None
         | Delay _ -> assert false
       in
@@ -719,8 +706,8 @@ let balance_query tl values s =
             }
         | Delay _ -> assert false
         | Of_array _ | Init _ | Growth_simple _ | Growth_compound _ | Year_frac _ | Events _
-        | Source_periods _ | Scan_flow _ | Accumulate _ | Pointwise_of_flow _
-        | Pointwise_of_balance _ | Flow_of_pointwise _ | Change_balance _ | Var _ | Fixpoint _ ->
+        | Source_periods _ | Scan_flow _ | Accumulate _ | Balance_to_flow_approx _
+        | Change_balance _ | Var _ | Fixpoint _ ->
             approx_balance_query tl values
       in
       Hashtbl.remove visiting s.id;
@@ -768,9 +755,7 @@ module Deps = struct
     | Scan_flow _ -> "scan"
     | Accumulate _ -> "accumulate"
     | Roll_forward _ -> "roll_forward"
-    | Pointwise_of_flow _ -> "pointwise_of_flow"
-    | Pointwise_of_balance _ -> "pointwise_of_balance"
-    | Flow_of_pointwise _ -> "flow_of_pointwise"
+    | Balance_to_flow_approx _ -> "balance_to_flow_approx"
     | Change_balance _ -> "change_balance"
     | Delay _ -> "delay"
     | Var _ -> "var"
@@ -784,14 +769,12 @@ module Deps = struct
     | Scale (_, src) | Neg src | Map (_, src) -> [ Pack src ]
     | Map2 (_, a, b) -> [ Pack a; Pack b ]
     | Sum ss -> List.map (fun s -> Pack s) ss
-    | Where { cond = Any_series cond; then_; else_ } -> [ Pack cond; Pack then_; Pack else_ ]
+    | Where { cond = Any_flow cond; then_; else_ } -> [ Pack cond; Pack then_; Pack else_ ]
     | Prev { src; _ } -> [ Pack src ]
     | Scan_flow { flow; _ } -> [ Pack flow ]
     | Accumulate { flow; _ } -> [ Pack flow ]
     | Roll_forward { flow; _ } -> [ Pack flow ]
-    | Pointwise_of_flow src -> [ Pack src ]
-    | Pointwise_of_balance src -> [ Pack src ]
-    | Flow_of_pointwise src -> [ Pack src ]
+    | Balance_to_flow_approx src -> [ Pack src ]
     | Change_balance { balance; _ } -> [ Pack balance ]
     | Delay _ -> []
     | Fixpoint { body; _ } -> [ Pack body ]

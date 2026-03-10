@@ -13,7 +13,7 @@
 
     Exact accrual is derived from the flow AST itself. Exact algebra (`add`, `sub`, `scale`, `neg`,
     `sum`) preserves exact accrual. Cell-local transforms (`map`, `map2`, `mul`, `div`, and related
-    operators) and any {!Pointwise.to_flow_approx} bridge fall back to approximate prorating. *)
+    operators) and {!Balance.to_flow_approx} fall back to approximate prorating. *)
 
 type 'c t
 (** The type for flows tagged with currency or unit ['c]. *)

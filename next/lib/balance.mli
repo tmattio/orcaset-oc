@@ -123,14 +123,21 @@ val at_period_start : ?name:string -> 'c t -> default:float -> 'c t
 val at_period_end : 'c t -> 'c t
 (** [at_period_end b] is [b]. A balance naturally denotes the end-of-period value. *)
 
-(** {1 Bridge to Flow and Pointwise} *)
+(** {1 Bridge to Flow} *)
+
+val to_flow_approx : ?name:string -> 'c t -> 'c Flow.t
+(** [to_flow_approx b] reads the materialized cell values of [b] as a flow.
+
+    This is an approximate bridge for per-period arithmetic. The resulting flow preserves cell
+    values, but it does not gain intrinsic interval semantics. Date-range accrual on the result is
+    approximate. *)
 
 val change : 'c t -> default:float -> 'c Flow.t
 (** [change b ~default] is the per-period delta of [b], as a flow.
 
     This is a real flow bridge: each cell is the period-over-period change in the balance. The
-    resulting flow is still approximate for arbitrary intra-period accrual. Use {!Pointwise} for
-    per-cell arithmetic on balances. *)
+    resulting flow is still approximate for arbitrary intra-period accrual. Use {!to_flow_approx}
+    when you need per-cell arithmetic on the balance level itself. *)
 
 (** {1 Feedback / fixpoint} *)
 

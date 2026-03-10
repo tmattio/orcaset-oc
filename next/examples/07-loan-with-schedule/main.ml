@@ -60,9 +60,7 @@ let loan_balance, (interest_pmt, principal_pmt) =
   Balance.feedback ~name:"Loan Balance" ~default:loan_amount (fun prev_bal ->
       let interest =
         Flow.named "Interest"
-          (Flow.scale (-.annual_rate)
-             (Pointwise.to_flow_approx
-                (Pointwise.mul (Pointwise.of_balance prev_bal) (Pointwise.of_flow accrual_yf))))
+          (Flow.scale (-.annual_rate) (Flow.mul (Balance.to_flow_approx prev_bal) accrual_yf))
       in
       let principal = Flow.named "Principal" (Flow.sub total_pmt interest) in
       let balance = Balance.roll_forward ~init:loan_amount principal in
