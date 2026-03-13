@@ -12,6 +12,7 @@ module Schedule = Schedule
 module Key = Key
 module Scope = Scope
 module Prorater = Prorater
+module Date_ref = Date_ref
 module Flow = Flow
 module Balance = Balance
 module Statement = Statement

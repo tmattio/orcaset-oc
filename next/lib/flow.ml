@@ -52,6 +52,10 @@ let where ~cond ~then_ ~else_ = Formula.where ~cond ~then_ ~else_
 
 let prev ?name src ~default = Formula.prev ?name src ~default
 let scan ?name ~init f flow = Formula.scan ?name ~init f flow
+
+let window ?name ?prorater ~start ~end_ flow =
+  Formula.flow_window ?name ?prorater ~start_ref:start ~end_ref:end_ flow
+
 let feedback ?name ~default f = Formula.feedback ?name ~kind:Formula.Flow_k ~default f
 
 let fixpoint ?name ?tol ?max_iter ~guess f =

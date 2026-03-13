@@ -22,8 +22,8 @@ type _ kind = Flow_k : flow_kind kind | Balance_k : balance_kind kind
 type prorater = Prorater.t
 (** A prorater allocates a full-period value to a sub-range of that period.
 
-    It returns the fraction of the value that belongs to [[sub_start, sub_end)].
-    Callers multiply the full-period value by the returned fraction.
+    It returns the fraction of the value that belongs to \[[sub_start];[sub_end]). Callers multiply
+    the full-period value by the returned fraction.
 
     The intended law is additivity over partitions of the full period. *)
 
@@ -79,6 +79,18 @@ and ('k, 'c) node =
   | Delay of ('k, 'c) delay
   | Var of float ref
   | Fixpoint of { var : ('k, 'c) t; body : ('k, 'c) t; tol : float; max_iter : int; guess : float }
+  | Flow_window of {
+      start_ref : Date_ref.t;
+      end_ref : Date_ref.t;
+      prorater : prorater;
+      flow : (flow_kind, 'c) t;
+      cache : (Timeline.t * float array) option ref;
+    }
+  | Balance_sample of {
+      at_ref : Date_ref.t;
+      balance : (balance_kind, 'c) t;
+      cache : (Timeline.t * float array) option ref;
+    }
 
 type packed = Pack : ('k, 'c) t -> packed
 
@@ -216,6 +228,23 @@ val change_balance : ?name:string -> (balance_kind, 'c) t -> default:float -> (f
 val convert : rate:float -> ('k, 'c1) t -> ('k, 'c2) t
 (** Currency-tag-changing scalar multiplication. *)
 
+(** {1 Date-query combinators} *)
+
+val flow_window :
+  ?name:string ->
+  ?prorater:prorater ->
+  start_ref:Date_ref.t ->
+  end_ref:Date_ref.t ->
+  (flow_kind, 'c) t ->
+  (flow_kind, 'c) t
+(** A flow that, for each evaluation period, accrues the source flow over a date range determined by
+    resolving the start and end date references against the current period. *)
+
+val balance_sample :
+  ?name:string -> at_ref:Date_ref.t -> (balance_kind, 'c) t -> (balance_kind, 'c) t
+(** A balance that, for each evaluation period, samples the source balance at a date determined by
+    resolving the date reference against the current period. *)
+
 (** {1 Feedback and fixpoint} *)
 
 exception Cycle_error of { formula_name : string option; period_index : int }
@@ -301,7 +330,7 @@ module Query : sig
 
   val accrue :
     ?prorater:prorater -> Timeline.t -> float array -> start_date:Date.t -> end_date:Date.t -> float
-  (** Sum of period values over [[start_date, end_date)]. *)
+  (** Sum of period values over \[[start_date];[end_date]). *)
 end
 
 type query_mode =

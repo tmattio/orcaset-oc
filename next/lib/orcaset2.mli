@@ -38,8 +38,8 @@
 
     {1 Modules}
 
-    {!modules:Date Period Daycount Calendar Timeline Schedule Key Scope Prorater Flow Balance
-    Statement} *)
+    {!modules:Date Period Daycount Calendar Timeline Schedule Key Scope Prorater Date_ref Flow
+    Balance Statement} *)
 
 module Date : module type of Date
 (** Gregorian calendar dates. *)
@@ -105,6 +105,9 @@ module Scope : module type of Scope
 module Prorater : module type of Prorater
 (** Allocate a full-period value to a sub-range. *)
 
+module Date_ref : module type of Date_ref
+(** Dates relative to the current evaluation period. *)
+
 module Flow : sig
   (** Interval quantities (flows).
 
@@ -144,8 +147,11 @@ module Flow : sig
   (** [init f] is a flow that produces [f period] at each period. *)
 
   val init_indexed : ?name:string -> (int -> Period.t -> float) -> 'c t
-  (** [init_indexed f] is a flow that produces [f i period] at period [i]. Prefer {!init} unless the
-      index is genuinely needed (e.g. indexing into an external array). *)
+  (** [init_indexed f] is a flow that produces [f i period] at period [i].
+
+      This is a low-level escape hatch. Prefer {!init} for period-based construction. Use
+      [init_indexed] only when the zero-based index is genuinely needed (e.g. indexing into an
+      external array). *)
 
   val of_array : ?name:string -> float array -> 'c t
   (** [of_array arr] is a flow that produces [arr.(i)] at period [i]. Periods beyond
@@ -252,6 +258,24 @@ module Flow : sig
   val where : cond:'a t -> then_:'c t -> else_:'c t -> 'c t
   (** [where ~cond ~then_ ~else_] selects [then_] when [cond.(i) <> 0.0] and [else_] otherwise. Only
       the selected branch is evaluated at each period. *)
+
+  (** {1:cross_period Cross-period} *)
+
+  val prev : ?name:string -> 'c t -> default:float -> 'c t
+  (** [prev f ~default] produces [default] at period 0 and [f.(i-1)] at later periods. *)
+
+  val scan : ?name:string -> init:float -> (acc:float -> x:float -> float) -> 'c t -> 'c t
+  (** [scan ~init f flow] is a running accumulation of [flow] where [acc] is the previous output of
+      the scan itself. The result stays in flow semantics. *)
+
+  val window :
+    ?name:string -> ?prorater:Prorater.t -> start:Date_ref.t -> end_:Date_ref.t -> 'c t -> 'c t
+  (** [window ~start ~end_ flow] is a flow where each period's value is [flow] accrued over
+      [\[Date_ref.resolve period start, Date_ref.resolve period end_)].
+
+      The date references are resolved against each evaluation period, enabling cross-period
+      windowing such as trailing sums. Returns [0.0] when the resolved range is empty or inverted.
+      Query mode is always {!Materialized.Approx}. *)
 
   (** {1:feedback Feedback} *)
 
@@ -397,6 +421,9 @@ module Balance : sig
   val const : ?name:string -> float -> 'c t
   (** [const v] is a balance that produces [v] at every period. *)
 
+  val init : ?name:string -> (Period.t -> float) -> 'c t
+  (** [init f] is a balance that produces [f period] for each period. *)
+
   val of_array : ?name:string -> float array -> 'c t
   (** [of_array arr] is a balance that produces [arr.(i)] at period [i]. Periods beyond
       [Array.length arr] produce [0.0]. The array is captured by reference and must not be mutated
@@ -489,6 +516,17 @@ module Balance : sig
   (** [at_period_end b] is [b] (identity). A balance naturally represents the end-of-period value.
   *)
 
+  val sample : ?name:string -> at:Date_ref.t -> 'c t -> 'c t
+  (** [sample ~at balance] is a balance where each period's value is [balance]'s materialized cell
+      value for the period enclosing [Date_ref.resolve period at].
+
+      This is cell-level lookup, not intra-period interpolation. For the "balance at the start of
+      this period" pattern, prefer {!at_period_start} which returns the previous period's end value.
+
+      Query mode is always {!Materialized.Approx}.
+
+      Raises [Invalid_argument] if a resolved date falls outside the timeline. *)
+
   (** {1:bridge_to_flow Bridge to Flow} *)
 
   val change : 'c t -> default:float -> 'c Flow.t
@@ -501,8 +539,8 @@ module Balance : sig
   (** [to_flow_approx b] reads the materialized cell values of [b] as a flow.
 
       This is an approximate bridge for per-period arithmetic. The resulting flow preserves cell
-      values, but it does not gain intrinsic interval semantics. Date-range accrual on the result
-      is approximate. Use {!change} for genuine period-over-period deltas. *)
+      values, but it does not gain intrinsic interval semantics. Date-range accrual on the result is
+      approximate. Use {!change} for genuine period-over-period deltas. *)
 
   (** {1:feedback Feedback} *)
 

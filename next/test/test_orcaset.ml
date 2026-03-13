@@ -520,7 +520,8 @@ let test_materialized () =
   check int "iter count" 3 !count
 
 let test_balance_to_flow_approx () =
-  ev "to_flow_approx" tl3 (Balance.to_flow_approx (Balance.of_array [| 10.0; 20.0; 30.0 |]))
+  ev "to_flow_approx" tl3
+    (Balance.to_flow_approx (Balance.of_array [| 10.0; 20.0; 30.0 |]))
     [| 10.0; 20.0; 30.0 |]
 
 (* Statement *)
@@ -1193,6 +1194,73 @@ let test_scope () =
 
 (* Run *)
 
+(* Date_ref, Flow.window, Balance.sample *)
+
+let test_date_ref_and_window () =
+  let tl6 = Timeline.monthly ~start_date:(date 2025 1 1) ~n:6 in
+  (* Flow.prev via public API *)
+  ev "flow prev" tl3
+    (Flow.prev (Flow.of_array [| 10.0; 20.0; 30.0 |]) ~default:0.0)
+    [| 0.0; 10.0; 20.0 |];
+  (* Flow.scan: running sum *)
+  ev "flow scan sum" tl3
+    (Flow.scan ~init:0.0 (fun ~acc ~x -> acc +. x) (Flow.of_array [| 10.0; 20.0; 30.0 |]))
+    [| 10.0; 30.0; 60.0 |];
+  (* Balance.init via public API *)
+  let evb msg tl b exp = fla msg exp (Balance.Materialized.to_array (Balance.eval tl b)) in
+  evb "balance init" tl3
+    (Balance.init (fun p -> float_of_int (Period.days p)))
+    [| 31.0; 28.0; 31.0 |];
+  (* Date_ref.resolve *)
+  let p = Period.make ~start_date:(date 2025 3 1) ~end_date:(date 2025 4 1) in
+  ds "ref period_start" "2025-03-01" (Date_ref.resolve p Date_ref.period_start);
+  ds "ref period_end" "2025-04-01" (Date_ref.resolve p Date_ref.period_end);
+  ds "ref shift -1m" "2025-02-01"
+    (Date_ref.resolve p (Date_ref.shift (Period.make_offset ~months:(-1) ()) Date_ref.period_start));
+  (* Flow.window: identity window (period_start..period_end = same values) *)
+  let base = Flow.of_array [| 100.0; 200.0; 300.0; 400.0; 500.0; 600.0 |] in
+  ev "window identity" tl6
+    (Flow.window ~start:Date_ref.period_start ~end_:Date_ref.period_end base)
+    [| 100.0; 200.0; 300.0; 400.0; 500.0; 600.0 |];
+  (* Flow.window: trailing 2-month window over events with exact accrual *)
+  let events =
+    Flow.of_events
+      [
+        (date 2025 1 15, 10.0);
+        (date 2025 2 15, 20.0);
+        (date 2025 3 15, 30.0);
+        (date 2025 4 15, 40.0);
+        (date 2025 5 15, 50.0);
+        (date 2025 6 15, 60.0);
+      ]
+  in
+  let trailing =
+    Flow.window
+      ~start:(Date_ref.shift (Period.make_offset ~months:(-1) ()) Date_ref.period_start)
+      ~end_:Date_ref.period_end events
+  in
+  let m = Flow.eval tl6 trailing in
+  (* Period 0 (Jan 1 - Feb 1): window is Dec 1 - Feb 1, events in range: Jan 15 = 10 *)
+  fl "window trailing[0]" 10.0 (Flow.Materialized.get m 0);
+  (* Period 1 (Feb 1 - Mar 1): window is Jan 1 - Mar 1, events: Jan 15 + Feb 15 = 30 *)
+  fl "window trailing[1]" 30.0 (Flow.Materialized.get m 1);
+  (* Period 2 (Mar 1 - Apr 1): window is Feb 1 - Apr 1, events: Feb 15 + Mar 15 = 50 *)
+  fl "window trailing[2]" 50.0 (Flow.Materialized.get m 2);
+  (* Query mode is always Approx *)
+  flow_mode "window approx" "Approx" m;
+  (* Balance.sample: sample at period_end (approx = cell lookup) *)
+  let obs = Balance.of_dates [ (date 2025 1 15, 100.0); (date 2025 3 15, 300.0) ] in
+  let sampled_end = Balance.sample ~at:Date_ref.period_end obs in
+  let mb = Balance.eval tl6 sampled_end in
+  (* Approx mode: resolves date, finds enclosing period, returns that cell *)
+  (* period_end of period 0 = Feb 1 -> find_index = period 1 -> cell = 100.0 *)
+  fl "sample[0]" 100.0 (Balance.Materialized.get mb 0);
+  (* period_end of period 1 = Mar 1 -> find_index = period 2 -> cell = 300.0 *)
+  fl "sample[1]" 300.0 (Balance.Materialized.get mb 1);
+  (* period_end of period 2 = Apr 1 -> find_index = period 3 -> cell = 300.0 *)
+  fl "sample[2]" 300.0 (Balance.Materialized.get mb 2);
+  balance_mode "sample approx" "Approx" mb
+
 let () =
   run "orcaset2"
     [
@@ -1203,8 +1271,7 @@ let () =
       ("Prorater", [ test_case "prorater" `Quick test_prorater ]);
       ("Calendar", [ test_case "calendar" `Quick test_calendar ]);
       ("Schedule", [ test_case "schedule" `Quick test_schedule ]);
-      ( "Balance bridge",
-        [ test_case "to_flow_approx" `Quick test_balance_to_flow_approx ] );
+      ("Balance bridge", [ test_case "to_flow_approx" `Quick test_balance_to_flow_approx ]);
       ( "Flow combinators",
         [
           test_case "constructors" `Quick test_flow_constructors;
@@ -1224,4 +1291,6 @@ let () =
       ("Key", [ test_case "key" `Quick test_key ]);
       ("Scope", [ test_case "scope" `Quick test_scope ]);
       ("Integration", [ test_case "coffee shop" `Quick test_coffee_shop ]);
+      ( "Date_ref and window",
+        [ test_case "date_ref, window, sample" `Quick test_date_ref_and_window ] );
     ]

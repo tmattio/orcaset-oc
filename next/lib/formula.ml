@@ -15,9 +15,7 @@
 
 type flow_kind
 type balance_kind
-
 type _ kind = Flow_k : flow_kind kind | Balance_k : balance_kind kind
-
 type prorater = Prorater.t
 
 let default_prorater = Prorater.actual_days
@@ -75,6 +73,18 @@ and ('k, 'c) node =
   | Delay of ('k, 'c) delay
   | Var of float ref
   | Fixpoint of { var : ('k, 'c) t; body : ('k, 'c) t; tol : float; max_iter : int; guess : float }
+  | Flow_window of {
+      start_ref : Date_ref.t;
+      end_ref : Date_ref.t;
+      prorater : prorater;
+      flow : (flow_kind, 'c) t;
+      cache : (Timeline.t * float array) option ref;
+    }
+  | Balance_sample of {
+      at_ref : Date_ref.t;
+      balance : (balance_kind, 'c) t;
+      cache : (Timeline.t * float array) option ref;
+    }
 
 type packed = Pack : ('k, 'c) t -> packed
 
@@ -155,6 +165,14 @@ let roll_forward ?name ~init flow = mk ?name Balance_k (Roll_forward { init; flo
 let balance_to_flow_approx ?name balance = mk ?name Flow_k (Balance_to_flow_approx balance)
 let change_balance ?name balance ~default = mk ?name Flow_k (Change_balance { balance; default })
 let convert ~rate s = (Obj.magic (scale rate s) : (_, _) t)
+
+(* Date-query combinators *)
+
+let flow_window ?name ?(prorater = default_prorater) ~start_ref ~end_ref flow =
+  mk ?name Flow_k (Flow_window { start_ref; end_ref; prorater; flow; cache = ref None })
+
+let balance_sample ?name ~at_ref balance =
+  mk ?name Balance_k (Balance_sample { at_ref; balance; cache = ref None })
 
 (* Feedback / fixpoint *)
 
@@ -256,6 +274,28 @@ let cached_bins cache tl build =
       cache := Some (tl, bins);
       bins
 
+(* Overlap-based approximate accrual over materialized values. Defined before
+   the [eval_cell] / [compute] mutual recursion so [Flow_window] can call it. *)
+let overlap_accrue ~prorater tl values ~start_date ~end_date =
+  if Date.compare end_date start_date <= 0 then 0.0
+  else begin
+    let n = Timeline.length tl in
+    let total = ref 0.0 in
+    for j = 0 to n - 1 do
+      let pj = Timeline.get tl j in
+      let ov_start = Date.max start_date (Period.start_date pj) in
+      let ov_end = Date.min end_date (Period.end_date pj) in
+      if Date.compare ov_start ov_end < 0 then begin
+        let frac =
+          prorater ~start_date:(Period.start_date pj) ~end_date:(Period.end_date pj)
+            ~sub_start:ov_start ~sub_end:ov_end
+        in
+        total := !total +. (values.(j) *. frac)
+      end
+    done;
+    !total
+  end
+
 let rec invalidate_period : type k c. eval_ctx -> (k, c) t -> int -> unit =
  fun ctx s i ->
   match s.node with
@@ -284,7 +324,9 @@ let rec invalidate_period : type k c. eval_ctx -> (k, c) t -> int -> unit =
             invalidate_period ctx else_ i
         | Balance_to_flow_approx src -> invalidate_period ctx src i
         | Change_balance { balance; _ } -> invalidate_period ctx balance i
-        | Prev _ | Scan_flow _ | Accumulate _ | Roll_forward _ | Fixpoint _ | Delay _ -> ()
+        | Prev _ | Scan_flow _ | Accumulate _ | Roll_forward _ | Fixpoint _ | Delay _
+        | Flow_window _ | Balance_sample _ ->
+            ()
       end
 
 and eval_cell : type k c. eval_ctx -> (k, c) t -> int -> float =
@@ -373,6 +415,35 @@ and compute : type k c. eval_ctx -> (k, c) t -> int -> float =
         end
       in
       iterate initial 0
+  | Flow_window { start_ref; end_ref; prorater; flow; cache } ->
+      let values =
+        match !cache with
+        | Some (cached_tl, v) when cached_tl == ctx.tl -> v
+        | _ ->
+            let v = Array.init ctx.n (fun j -> eval_cell ctx flow j) in
+            cache := Some (ctx.tl, v);
+            v
+      in
+      let p = Timeline.get ctx.tl i in
+      overlap_accrue ~prorater ctx.tl values ~start_date:(Date_ref.resolve p start_ref)
+        ~end_date:(Date_ref.resolve p end_ref)
+  | Balance_sample { at_ref; balance; cache; _ } -> (
+      let values =
+        match !cache with
+        | Some (cached_tl, v) when cached_tl == ctx.tl -> v
+        | _ ->
+            let v = Array.init ctx.n (fun j -> eval_cell ctx balance j) in
+            cache := Some (ctx.tl, v);
+            v
+      in
+      let p = Timeline.get ctx.tl i in
+      let date = Date_ref.resolve p at_ref in
+      match Timeline.find_index ctx.tl date with
+      | None ->
+          invalid_arg
+            (Printf.sprintf "Formula.Balance_sample: date %s is outside the timeline"
+               (Date.to_string date))
+      | Some j -> values.(j))
   | Delay _ -> failwith "Formula.compute: unexpected unresolved Delay"
 
 let eval_with_ctx ctx s = Array.init ctx.n (fun i -> eval_cell ctx s i)
@@ -451,23 +522,7 @@ module Query = struct
         values.(i) *. frac
 
   let accrue ?(prorater = default_prorater) tl values ~start_date ~end_date =
-    if Date.compare end_date start_date <= 0 then 0.0
-    else begin
-      let total = ref 0.0 in
-      for i = 0 to Timeline.length tl - 1 do
-        let p = Timeline.get tl i in
-        let ov_start = Date.max start_date (Period.start_date p) in
-        let ov_end = Date.min end_date (Period.end_date p) in
-        if Date.compare ov_start ov_end < 0 then begin
-          let frac =
-            prorater ~start_date:(Period.start_date p) ~end_date:(Period.end_date p)
-              ~sub_start:ov_start ~sub_end:ov_end
-          in
-          total := !total +. (values.(i) *. frac)
-        end
-      done;
-      !total
-    end
+    overlap_accrue ~prorater tl values ~start_date ~end_date
 end
 
 (* Exact query capability derivation from the AST.
@@ -562,7 +617,8 @@ let exact_flow_accrual : type c.
                   List.fold_left (fun acc f -> acc +. f ~start_date ~end_date) 0.0 fs)
         | Map _ | Map2 _ | Of_array _ | Init _ | Growth_simple _ | Growth_compound _ | Year_frac _
         | Where _ | Prev _ | Scan_flow _ | Accumulate _ | Roll_forward _ | Balance_to_flow_approx _
-        | Change_balance _ | Var _ | Fixpoint _ | Const _ | Observations _ ->
+        | Change_balance _ | Var _ | Fixpoint _ | Const _ | Observations _ | Flow_window _
+        | Balance_sample _ ->
             None
         | Delay _ -> assert false
       in
@@ -707,7 +763,7 @@ let balance_query tl values s =
         | Delay _ -> assert false
         | Of_array _ | Init _ | Growth_simple _ | Growth_compound _ | Year_frac _ | Events _
         | Source_periods _ | Scan_flow _ | Accumulate _ | Balance_to_flow_approx _
-        | Change_balance _ | Var _ | Fixpoint _ ->
+        | Change_balance _ | Var _ | Fixpoint _ | Flow_window _ | Balance_sample _ ->
             approx_balance_query tl values
       in
       Hashtbl.remove visiting s.id;
@@ -760,6 +816,8 @@ module Deps = struct
     | Delay _ -> "delay"
     | Var _ -> "var"
     | Fixpoint _ -> "fixpoint"
+    | Flow_window _ -> "flow_window"
+    | Balance_sample _ -> "balance_sample"
 
   let children_of_node : type k c. (k, c) ast_node -> packed list = function
     | Const _ | Of_array _ | Init _ | Growth_simple _ | Growth_compound _ | Year_frac _ | Events _
@@ -778,6 +836,8 @@ module Deps = struct
     | Change_balance { balance; _ } -> [ Pack balance ]
     | Delay _ -> []
     | Fixpoint { body; _ } -> [ Pack body ]
+    | Flow_window { flow; _ } -> [ Pack flow ]
+    | Balance_sample { balance; _ } -> [ Pack balance ]
 
   let full_graph roots =
     let visited = Hashtbl.create 64 in
@@ -847,7 +907,8 @@ module Deps = struct
 
   let node_attrs = function
     | "const" | "init" | "var" | "array" -> "shape=box style=filled fillcolor=\"#E8F4FD\""
-    | "prev" | "scan" | "accumulate" | "roll_forward" | "fixpoint" ->
+    | "prev" | "scan" | "accumulate" | "roll_forward" | "fixpoint" | "flow_window"
+    | "balance_sample" ->
         "shape=box style=\"filled,dashed\" fillcolor=\"#FFF3E0\""
     | "where" -> "shape=diamond style=filled fillcolor=\"#F5F5F5\""
     | _ -> "shape=ellipse style=filled fillcolor=\"#F5F5F5\""

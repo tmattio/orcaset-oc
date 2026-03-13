@@ -150,6 +150,15 @@ val scan : ?name:string -> init:float -> (acc:float -> x:float -> float) -> 'c t
 (** [scan ~init f flow] is a running accumulation of [flow] where [acc] is the previous output of
     the scan itself. *)
 
+val window :
+  ?name:string -> ?prorater:Prorater.t -> start:Date_ref.t -> end_:Date_ref.t -> 'c t -> 'c t
+(** [window ~start ~end_ flow] is a flow where each period's value is [flow] accrued over
+    [\[Date_ref.resolve period start, Date_ref.resolve period end_)].
+
+    The date references are resolved against each evaluation period, enabling cross-period windowing
+    such as trailing sums. Returns [0.0] when the resolved range is empty or inverted. Query mode is
+    always {!Materialized.Approx}. *)
+
 (** {1 Feedback and fixpoint} *)
 
 val feedback : ?name:string -> default:float -> ('c t -> 'c t * 'a) -> 'a

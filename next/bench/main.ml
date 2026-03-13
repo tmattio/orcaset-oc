@@ -206,8 +206,7 @@ let loan_bench n () =
         let balance = Balance.roll_forward ~init:loan_amount principal in
         (balance, (balance, (interest, principal))))
   in
-  ignore
-    (Flow.eval_many tl [ Balance.to_flow_approx balance; interest; principal ])
+  ignore (Flow.eval_many tl [ Balance.to_flow_approx balance; interest; principal ])
 
 let loan_benchmarks = sized [ 12; 120; 360 ] loan_bench
 

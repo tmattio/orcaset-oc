@@ -123,6 +123,17 @@ val at_period_start : ?name:string -> 'c t -> default:float -> 'c t
 val at_period_end : 'c t -> 'c t
 (** [at_period_end b] is [b]. A balance naturally denotes the end-of-period value. *)
 
+val sample : ?name:string -> at:Date_ref.t -> 'c t -> 'c t
+(** [sample ~at balance] is a balance where each period's value is [balance]'s materialized cell
+    value for the period enclosing [Date_ref.resolve period at].
+
+    This is cell-level lookup, not intra-period interpolation. For the "balance at the start of this
+    period" pattern, prefer {!at_period_start} which returns the previous period's end value.
+
+    Query mode is always {!Materialized.Approx}.
+
+    Raises [Invalid_argument] if a resolved date falls outside the timeline. *)
+
 (** {1 Bridge to Flow} *)
 
 val to_flow_approx : ?name:string -> 'c t -> 'c Flow.t
