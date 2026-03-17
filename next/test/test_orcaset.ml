@@ -454,6 +454,11 @@ let test_query () =
   fl "accrue partial"
     (310.0 *. 15.0 /. 31.0)
     (Flow.Materialized.accrue m1 ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 16));
+  fl "accrue clipped before start" 100.0
+    (Flow.Materialized.accrue vals_m ~start_date:(date 2024 12 1) ~end_date:(date 2025 2 1));
+  invalid "Formula.Query.accrue: end date 2025-05-01 is outside the timeline (ends at 2025-04-01)"
+    (fun () ->
+      ignore (Flow.Materialized.accrue vals_m ~start_date:(date 2025 3 1) ~end_date:(date 2025 5 1)));
   (* balance_at via Balance.Materialized.at *)
   let flow = Flow.of_array [| 100.0; 200.0; 300.0 |] in
   let balance = Balance.roll_forward ~init:1000.0 flow in
@@ -919,6 +924,9 @@ let test_flow () =
   (* accrue: non-overlapping range returns 0.0 *)
   fl "accrue outside" 0.0
     (Flow.Materialized.accrue m ~start_date:(date 2024 1 1) ~end_date:(date 2024 2 1));
+  fl "accrue exact clipped before start" 150.0
+    (Flow.Materialized.accrue (Flow.eval tl3 (Flow.of_events [ (date 2025 1 10, 150.0) ]))
+       ~start_date:(date 2024 12 1) ~end_date:(date 2025 2 1));
   (* of_periods: overlap-based splitting *)
   let wide_period = Period.make ~start_date:(date 2025 1 1) ~end_date:(date 2025 3 1) in
   evf "of_periods overlap" tl3 (Flow.of_periods [ (wide_period, 590.0) ]) [| 310.0; 280.0; 0.0 |];
@@ -931,6 +939,9 @@ let test_flow () =
     (Flow.Materialized.accrue evt_m ~start_date:(date 2025 1 1) ~end_date:(date 2025 2 1));
   fl "accrue events partial" 100.0
     (Flow.Materialized.accrue evt_m ~start_date:(date 2025 1 1) ~end_date:(date 2025 1 15));
+  invalid "Formula.flow_query: end date 2025-05-01 is outside the timeline (ends at 2025-04-01)"
+    (fun () ->
+      ignore (Flow.Materialized.accrue evt_m ~start_date:(date 2025 3 1) ~end_date:(date 2025 5 1)));
   (* accrue with source_periods provenance *)
   let sp_flow = Flow.of_periods [ (wide_period, 590.0) ] in
   let sp_m = Flow.eval tl3 sp_flow in
@@ -1248,6 +1259,14 @@ let test_date_ref_and_window () =
   fl "window trailing[2]" 50.0 (Flow.Materialized.get m 2);
   (* Query mode is always Approx *)
   flow_mode "window approx" "Approx" m;
+  let forward =
+    Flow.window ~start:Date_ref.period_end
+      ~end_:(Date_ref.shift (Period.make_offset ~months:1 ()) Date_ref.period_end)
+      base
+  in
+  invalid
+    "Formula.Flow_window: end date 2025-08-01 is outside the timeline (ends at 2025-07-01)"
+    (fun () -> ignore (Flow.eval tl6 forward));
   (* Balance.sample: sample at period_end (approx = cell lookup) *)
   let obs = Balance.of_dates [ (date 2025 1 15, 100.0); (date 2025 3 15, 300.0) ] in
   let sampled_end = Balance.sample ~at:Date_ref.period_end obs in
@@ -1259,7 +1278,15 @@ let test_date_ref_and_window () =
   fl "sample[1]" 300.0 (Balance.Materialized.get mb 1);
   (* period_end of period 2 = Apr 1 -> find_index = period 3 -> cell = 300.0 *)
   fl "sample[2]" 300.0 (Balance.Materialized.get mb 2);
-  balance_mode "sample approx" "Approx" mb
+  balance_mode "sample approx" "Approx" mb;
+  let sampled_before =
+    Balance.sample
+      ~at:(Date_ref.shift (Period.make_offset ~months:(-1) ()) Date_ref.period_start)
+      obs
+  in
+  invalid
+    "Formula.Balance_sample: date 2024-12-01 is outside the timeline (2025-01-01..2025-07-01)"
+    (fun () -> ignore (Balance.eval tl6 sampled_before))
 
 let () =
   run "orcaset2"

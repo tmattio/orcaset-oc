@@ -156,8 +156,10 @@ val window :
     [\[Date_ref.resolve period start, Date_ref.resolve period end_)].
 
     The date references are resolved against each evaluation period, enabling cross-period windowing
-    such as trailing sums. Returns [0.0] when the resolved range is empty or inverted. Query mode is
-    always {!Materialized.Approx}. *)
+    such as trailing sums. Returns [0.0] when the resolved range is empty or inverted. If the range
+    starts before the evaluation timeline, Orcaset clips it to {!Timeline.start_date}. If the range
+    ends after {!Timeline.end_date}, Orcaset raises [Invalid_argument]. Query mode is always
+    {!Materialized.Approx}. *)
 
 (** {1 Feedback and fixpoint} *)
 
@@ -232,7 +234,9 @@ module Materialized : sig
       source-period overlap, and exact linear compositions). Otherwise it falls back to prorating
       materialized period values with [prorater].
 
-      Range semantics are half-open: [start_date] is included and [end_date] is excluded. *)
+      Range semantics are half-open: [start_date] is included and [end_date] is excluded. If the
+      range starts before the evaluation timeline, Orcaset clips it to {!Timeline.start_date}. If
+      the range ends after {!Timeline.end_date}, Orcaset raises [Invalid_argument]. *)
 end
 
 val eval : Timeline.t -> 'c t -> 'c Materialized.t

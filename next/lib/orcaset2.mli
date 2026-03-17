@@ -14,6 +14,10 @@
       point-in-time values.
     + Organize into hierarchical {!Statement}s for structured output.
 
+    A {!Timeline.t} is also the model horizon for forward references. Orcaset clips flow ranges that
+    start before the timeline, but forward-looking flow ranges and sampled balance dates must remain
+    within the timeline's end date.
+
     {1 Quick start}
 
     {[
@@ -275,7 +279,9 @@ module Flow : sig
 
       The date references are resolved against each evaluation period, enabling cross-period
       windowing such as trailing sums. Returns [0.0] when the resolved range is empty or inverted.
-      Query mode is always {!Materialized.Approx}. *)
+      If the range starts before the evaluation timeline, Orcaset clips it to {!Timeline.start_date}.
+      If the range ends after {!Timeline.end_date}, Orcaset raises [Invalid_argument]. Query mode is
+      always {!Materialized.Approx}. *)
 
   (** {1:feedback Feedback} *)
 
@@ -522,6 +528,8 @@ module Balance : sig
 
       This is cell-level lookup, not intra-period interpolation. For the "balance at the start of
       this period" pattern, prefer {!at_period_start} which returns the previous period's end value.
+      Unlike {!Flow.window}, balance sampling does not clip before the timeline because balances do
+      not have a natural zero-valued missing-history default.
 
       Query mode is always {!Materialized.Approx}.
 

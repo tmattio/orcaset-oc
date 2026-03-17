@@ -128,7 +128,9 @@ val sample : ?name:string -> at:Date_ref.t -> 'c t -> 'c t
     value for the period enclosing [Date_ref.resolve period at].
 
     This is cell-level lookup, not intra-period interpolation. For the "balance at the start of this
-    period" pattern, prefer {!at_period_start} which returns the previous period's end value.
+    period" pattern, prefer {!at_period_start} which returns the previous period's end value. Unlike
+    {!Flow.window}, balance sampling does not clip before the timeline because balances do not have a
+    natural zero-valued missing-history default.
 
     Query mode is always {!Materialized.Approx}.
 

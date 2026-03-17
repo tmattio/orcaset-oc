@@ -25,7 +25,9 @@ let revenue =
 
    For each period, this accrues revenue over the 12 months ending at the
    current period's end date. The date references shift with the evaluation
-   grid, so no manual index arithmetic is needed. *)
+   grid, so no manual index arithmetic is needed. Early periods have less
+   than 12 months of history; Orcaset clips the window at the timeline start,
+   so the warm-up periods show partial trailing totals rather than errors. *)
 
 let ttm_revenue =
   Flow.window ~name:"TTM Revenue"

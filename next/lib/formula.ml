@@ -274,6 +274,23 @@ let cached_bins cache tl build =
       cache := Some (tl, bins);
       bins
 
+type normalized_flow_range =
+  | Empty_range
+  | Range of { start_date : Date.t; end_date : Date.t }
+
+let normalize_flow_range ~context tl ~start_date ~end_date =
+  if Date.compare end_date start_date <= 0 then Empty_range
+  else
+    let tl_start = Timeline.start_date tl in
+    let tl_end = Timeline.end_date tl in
+    if Date.compare end_date tl_end > 0 then
+      invalid_arg
+        (Printf.sprintf "%s: end date %s is outside the timeline (ends at %s)" context
+           (Date.to_string end_date) (Date.to_string tl_end))
+    else
+      let start_date = Date.max start_date tl_start in
+      if Date.compare end_date start_date <= 0 then Empty_range else Range { start_date; end_date }
+
 (* Overlap-based approximate accrual over materialized values. Defined before
    the [eval_cell] / [compute] mutual recursion so [Flow_window] can call it. *)
 let overlap_accrue ~prorater tl values ~start_date ~end_date =
@@ -425,8 +442,14 @@ and compute : type k c. eval_ctx -> (k, c) t -> int -> float =
             v
       in
       let p = Timeline.get ctx.tl i in
-      overlap_accrue ~prorater ctx.tl values ~start_date:(Date_ref.resolve p start_ref)
-        ~end_date:(Date_ref.resolve p end_ref)
+      let start_date = Date_ref.resolve p start_ref in
+      let end_date = Date_ref.resolve p end_ref in
+      begin
+        match normalize_flow_range ~context:"Formula.Flow_window" ctx.tl ~start_date ~end_date with
+        | Empty_range -> 0.0
+        | Range { start_date; end_date } ->
+            overlap_accrue ~prorater ctx.tl values ~start_date ~end_date
+      end
   | Balance_sample { at_ref; balance; cache; _ } -> (
       let values =
         match !cache with
@@ -441,8 +464,10 @@ and compute : type k c. eval_ctx -> (k, c) t -> int -> float =
       match Timeline.find_index ctx.tl date with
       | None ->
           invalid_arg
-            (Printf.sprintf "Formula.Balance_sample: date %s is outside the timeline"
-               (Date.to_string date))
+            (Printf.sprintf
+               "Formula.Balance_sample: date %s is outside the timeline (%s..%s)"
+               (Date.to_string date) (Date.to_string (Timeline.start_date ctx.tl))
+               (Date.to_string (Timeline.end_date ctx.tl)))
       | Some j -> values.(j))
   | Delay _ -> failwith "Formula.compute: unexpected unresolved Delay"
 
@@ -522,7 +547,10 @@ module Query = struct
         values.(i) *. frac
 
   let accrue ?(prorater = default_prorater) tl values ~start_date ~end_date =
-    overlap_accrue ~prorater tl values ~start_date ~end_date
+    match normalize_flow_range ~context:"Formula.Query.accrue" tl ~start_date ~end_date with
+    | Empty_range -> 0.0
+    | Range { start_date; end_date } ->
+        overlap_accrue ~prorater tl values ~start_date ~end_date
 end
 
 (* Exact query capability derivation from the AST.
@@ -641,7 +669,11 @@ let flow_query _tl values s =
   | Some accrue ->
       {
         mode = Exact;
-        accrue = (fun ~prorater:_ ~start_date ~end_date -> accrue ~start_date ~end_date);
+        accrue =
+          (fun ~prorater:_ ~start_date ~end_date ->
+            match normalize_flow_range ~context:"Formula.flow_query" _tl ~start_date ~end_date with
+            | Empty_range -> 0.0
+            | Range { start_date; end_date } -> accrue ~start_date ~end_date);
       }
   | None -> approx_flow_query _tl values
 
